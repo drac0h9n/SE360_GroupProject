@@ -1,117 +1,155 @@
-import math, sys, time, multiprocessing, pulp
-from itertools import combinations
-from math import comb
+import itertools, random, time, math, threading, sys
+from collections import defaultdict
+from ortools.sat.python import cp_model  # pip install ortools
+
+run_counter = defaultdict(int)
+
+
+class RunCounter:
+    def __init__(self):
+        self.counter = defaultdict(int)
+
+    def increment(self, params_tuple):
+        self.counter[params_tuple] += 1
+        return self.counter[params_tuple]
+
+    def get_count(self, params_tuple):
+        return self.counter.get(params_tuple, 0)
+
+    def reset(self, params_tuple=None):
+        if params_tuple:
+            self.counter[params_tuple] = 0
+        else:
+            self.counter.clear()
 
 
 class Sample:
-    def __init__(self, m, n, k, j, s, y):
+    def __init__(self, m, n, k, j, s, y, univ, timeout):
         self.m = m
         self.n = n
         self.k = k
         self.j = j
         self.s = s
         self.y = y
+        self.univ = univ
+        self.timeout = timeout
         self.ans = None
+        self.sets = []
+        self.result = None
 
-    # ---------------- ILP 求解函数 ----------------
-    def ilp_worker(self, queue, mode):
-        """
-        mode='A' -> 全覆盖； mode='B' -> 阈值覆盖
-        结果通过 queue.put(val) 返回；无解或非 Optimal 返回 None
-        """
-        try:
-            if mode == 'A':
-                B = list(combinations(range(self.n), self.k))
-                m = pulp.LpProblem('A', pulp.LpMinimize)
-                x = pulp.LpVariable.dicts('x', range(len(B)), 0, 1, pulp.LpBinary)
-                m += pulp.lpSum(x[i] for i in range(len(B)))
-                for sub in combinations(range(self.n), self.s):
-                    idx = [i for i, b in enumerate(B) if set(sub) <= set(b)]
-                    m += pulp.lpSum(x[i] for i in idx) >= 1
-            else:
-                B = list(combinations(range(self.n), self.k))
-                J = list(combinations(range(self.n), self.j))
-                m = pulp.LpProblem('B', pulp.LpMinimize)
-                x = pulp.LpVariable.dicts('x', range(len(B)), 0, 1, pulp.LpBinary)
-                m += pulp.lpSum(x[i] for i in range(len(B)))
-                for Jset in J:
-                    idx = [i for i, b in enumerate(B) if len(set(b) & set(Jset)) >= self.s]
-                    m += pulp.lpSum(x[i] for i in idx) >= self.y
-            m.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=600))
-            val = None if pulp.LpStatus[m.status] != 'Optimal' else int(pulp.value(m.objective) + 0.5)
-        except Exception:
-            val = None
-        queue.put(val)
+    # ---------------- 预计算 ----------------
+    def precompute(self):
+        s_subs = list(itertools.combinations(range(self.n), self.s))
+        s_id = {sub: i for i, sub in enumerate(s_subs)}
 
-    # ---------------- 近似快速算法 ----------------
-    def greedy_A(self):
-        if self.s > self.k: return None
-        B = [tuple(b) for b in combinations(range(self.n), self.k)]
-        subs = set(combinations(range(self.n), self.s))
-        cov = [set(combinations(b, self.s)) for b in B]
-        chosen = 0
-        while subs:
-            idx = max(range(len(B)), key=lambda i: len(cov[i] & subs))
-            gain = cov[idx] & subs
-            if not gain: return None
-            subs -= gain;
-            chosen += 1
+        blocks, block_mask = [], []
+        for blk in itertools.combinations(range(self.n), self.k):
+            m = 0
+            for sub in itertools.combinations(blk, self.s):
+                m |= 1 << s_id[sub]
+            blocks.append(blk)
+            block_mask.append(m)
+
+        j_masks = []
+        for J in itertools.combinations(range(self.n), self.j):
+            m = 0
+            for sub in itertools.combinations(J, self.s):
+                m |= 1 << s_id[sub]
+            j_masks.append(m)
+        return blocks, block_mask, j_masks
+
+    # ---------------- 贪心（回滚版） ----------------
+    def greedy_cover(self, block_mask, j_masks_init):
+        # 复制 j_masks，因为函数中会修改
+        j_masks = j_masks_init[:]
+        J = len(j_masks)
+        need = [self.y] * J
+        remain = set(range(J))
+        chosen = []
+
+        while remain:
+            best_idx, best_gain = -1, -1
+            for i, bm in enumerate(block_mask):
+                gain = 0
+                for jdx in remain:
+                    hit = (bm & j_masks[jdx]).bit_count()
+                    gain += min(hit, need[jdx])
+                if gain > best_gain:
+                    best_gain, best_idx = gain, i
+            if best_gain <= 0:
+                break
+            chosen.append(best_idx)
+            bm_sel = block_mask[best_idx]
+            done = []
+            for jdx in remain:
+                hit = (bm_sel & j_masks[jdx]).bit_count()
+                if hit:
+                    need[jdx] -= hit
+                    j_masks[jdx] &= ~bm_sel
+                    if need[jdx] <= 0:
+                        done.append(jdx)
+            for jdx in done:
+                remain.remove(jdx)
         return chosen
 
-    def greedy_B(self):
-        if self.j < self.s or self.y < 1 or self.y > comb(self.j, self.s): return None
-        B = [set(b) for b in combinations(range(self.n), self.k)]
-        J = [set(t) for t in combinations(range(self.n), self.j)]
-        need = [self.y] * len(J)
-        chosen = 0
-        while any(need):
-            idx = max(range(len(B)),
-                      key=lambda i: sum(need[p] and len(B[i] & J[p]) >= self.s for p in range(len(J))))
-            gain = False
-            for p, Jset in enumerate(J):
-                if need[p] and len(B[idx] & Jset) >= self.s:
-                    need[p] -= 1;
-                    gain = True
-            if not gain: return None
-            chosen += 1
-        return chosen
+    # ---------------- CP-SAT 精确 ----------------
+    def cpsat_cover(self, block_mask, j_masks):
+        B, J = len(block_mask), len(j_masks)
+        model = cp_model.CpModel()
+        x = [model.NewBoolVar(f"x{i}") for i in range(B)]
 
-    # ---------------- 统一包装 ----------------
-    def solve(self, timeout=10):
-        t0 = time.time()
-        # fast in main
-        fast = self.greedy_A() if self.y == 'all' else self.greedy_B()
-        # spawn ILP process
-        q = multiprocessing.Queue()
-        mode = 'A' if self.y == 'all' else 'B'
-        p = multiprocessing.Process(target=self.ilp_worker,
-                                    args=(q, mode))
-        p.start()
-        p.join(max(0, timeout - (time.time() - t0)))
-        ilp_val = None
-        if p.is_alive():
-            p.terminate();
-            p.join()
-        else:
-            ilp_val = q.get()
-        self.ans = ilp_val if ilp_val is not None else fast
+        # 为每条 j-组合单独建局部 cov 变量
+        for jdx, jm in enumerate(j_masks):
+            bits = jm
+            cov_vars = []
+            while bits:
+                lb = bits & -bits
+                v = model.NewBoolVar(f"c_{jdx}_{lb}")
+                cover = [x[i] for i, bm in enumerate(block_mask) if bm & lb]
+                model.Add(sum(cover) >= 1).OnlyEnforceIf(v)
+                model.Add(sum(cover) == 0).OnlyEnforceIf(v.Not())
+                cov_vars.append(v)
+                bits ^= lb
+            model.Add(sum(cov_vars) >= self.y)
 
-# # ---------------- CLI ----------------
-# def main():
-#     print("输入 n k j s y/all:")
-#     n = int(input("n: "))
-#     k = int(input("k: "))
-#     j = int(input("j: "))
-#     s = int(input("s: "))
-#     y = int(input("y (整数或 all): ").strip().lower())
-#     sample = Sample(45, n, k, j, s, y)
-#     # ans = sample.solve()
-#     # print(ans if ans is not None else '无可行解')
-#     sample.solve()
-#     print(sample.ans)
-#     # sys.exit(0)
-#
-#
-# if __name__ == "__main__":
-#     multiprocessing.freeze_support()
-#     main()
+        model.Minimize(sum(x))
+        solver = cp_model.CpSolver()
+        solver.parameters.max_time_in_seconds = self.timeout
+        solver.parameters.num_search_workers = 8
+        status = solver.Solve(model)
+        if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+            sel = [i for i in range(B) if solver.BooleanValue(x[i])]
+            return sel, solver.WallTime()
+        return None, solver.WallTime()
+
+    # ---------------- 打印 ----------------
+    def get_sets(self, blocks):
+        for i, idx in enumerate(self.result['idx'], 1):
+            set_str = f"Set {i}: {sorted(self.univ[e] for e in blocks[idx])}\n"
+            self.sets.append(set_str)
+
+    def run(self, run_idx):
+        blocks, block_mask, j_masks = self.precompute()
+        result, evt = {}, threading.Event()
+
+        def cp_thread():
+            sol, t = self.cpsat_cover(block_mask, j_masks.copy())
+            if sol:
+                result.update(idx=sol, alg='ILP', time=t)
+                evt.set()
+
+        def greedy_thread():
+            t0 = time.time()
+            sol = self.greedy_cover(block_mask, j_masks.copy())
+            evt.wait(max(0, self.timeout - (time.time() - t0)))
+            if not evt.is_set():
+                result.update(idx=sol, alg='Greedy', time=time.time() - t0)
+                evt.set()
+
+        threading.Thread(target=cp_thread, daemon=True).start()
+        threading.Thread(target=greedy_thread, daemon=True).start()
+        evt.wait()
+
+        self.result = result
+        self.get_sets(blocks)
+        self.ans = f"{self.m}-{self.n}-{self.k}-{self.j}-{self.s}-{run_idx}-{len(self.result['idx'])}"
