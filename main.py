@@ -5,6 +5,7 @@
 # 包含手动输入 Universe 和手动指定覆盖条件 y 的选项。
 # 移除了全局 RunCounter，使用 db.py 管理持久化 run_index。
 # **新增了数据库结果管理功能，允许用户查看、显示详情和删除数据库中的记录。**
+# **修改：移除了删除操作的二次确认弹窗。**
 
 import flet as ft
 import random
@@ -128,7 +129,7 @@ def main(page: ft.Page):
     delete_selected_button = ft.ElevatedButton(
         "删除所选",
         icon=ft.icons.DELETE_FOREVER,
-        on_click=None,
+        on_click=None, # <-- **修改点**: on_click 将直接绑定到 execute_delete
         color=ft.colors.RED, # 按钮文字颜色为红色
         disabled=True # 初始禁用
     )
@@ -169,7 +170,6 @@ def main(page: ft.Page):
                 content=ft.Text("选中记录详情", size=14, weight=ft.FontWeight.BOLD), # Text 不再有 margin 属性
                 margin=ft.margin.only(top=10) # 将 margin 应用于包含 Text 的 Container
             ),
-            # --- 修改部分结束 ---
             db_details_container # 详情显示容器
         ],
         visible=False, # 数据库管理视图初始时隐藏
@@ -530,33 +530,23 @@ def main(page: ft.Page):
              page.update() # 确保页面最终更新
 
     # --- 删除确认对话框 ---
-    delete_confirm_dialog = ft.AlertDialog(
-        modal=True,  # 模态对话框，阻止与其他界面交互
-        title=ft.Text("确认删除"),
-        content=ft.Text("确定要永久删除选中的这条结果记录吗？此操作无法撤销。"), # 默认提示内容
-        actions=[
-            # “确定删除”按钮，点击后执行删除操作
-            ft.TextButton("确定删除", on_click=None), # on_click 稍后绑定到 execute_delete
-            # “取消”按钮，点击后关闭对话框
-            ft.TextButton("取消", on_click=lambda e: close_dialog(delete_confirm_dialog)),
-        ],
-        actions_alignment=ft.MainAxisAlignment.END, # 按钮右对齐
-    )
+    # **修改点**: 移除了 delete_confirm_dialog 的定义
+    # delete_confirm_dialog = ft.AlertDialog(...) # <--- 此块代码已删除
 
-    def close_dialog(dialog: ft.AlertDialog):
-        """关闭指定的对话框"""
-        dialog.open = False
-        page.update()
+    # **修改点**: 移除了 close_dialog 函数
+    # def close_dialog(dialog: ft.AlertDialog): ... # <--- 此函数已删除
 
     def execute_delete(e):
-        """执行实际的删除操作 (由确认对话框的“确定”按钮调用)"""
-        close_dialog(delete_confirm_dialog) # 首先关闭对话框
+        """执行实际的删除操作 (由“删除所选”按钮直接调用)"""
+        # **修改点**: 移除了关闭对话框的调用
+        # close_dialog(delete_confirm_dialog) # 首先关闭对话框 (不再需要)
+
         if selected_db_result_id.current is None: # 再次检查是否有选中项
             log_message("未选择任何记录进行删除。", is_error=True)
             return
 
         target_id = selected_db_result_id.current
-        log_message(f"正在尝试删除 ID={target_id} 的记录...")
+        log_message(f"正在尝试直接删除 ID={target_id} 的记录...")
         try:
             success = db.delete_result(target_id) # 调用 db 模块的删除函数
             if success:
@@ -575,33 +565,17 @@ def main(page: ft.Page):
              page.update() # 确保 UI 更新
 
     # --- 将 execute_delete 绑定到确认对话框的“确定删除”按钮 ---
-    delete_confirm_dialog.actions[0].on_click = execute_delete
+    # **修改点**: 移除了这一行，因为对话框不存在了
+    # delete_confirm_dialog.actions[0].on_click = execute_delete
 
-    def confirm_delete(e):
-        """当用户点击“删除所选”按钮时触发，打开确认对话框"""
-        if selected_db_result_id.current is None: # 检查是否已选中记录
-            log_message("请先选择一条记录再进行删除。", is_error=True)
-            return
-
-        # (可选) 更新对话框内容，显示将要删除的记录的摘要信息
-        target_id = selected_db_result_id.current
-        selected_item = next((item for item in db_results_list_data.current if item['id'] == target_id), None)
-        item_desc = f"ID: {target_id}" # 默认只显示 ID
-        if selected_item:
-            item_desc = format_result_summary(selected_item) # 如果找到了摘要信息，使用格式化的摘要
-
-        # 更新对话框的提示文本
-        delete_confirm_dialog.content = ft.Text(f"确定要永久删除选中的记录吗？\n({item_desc})\n此操作无法撤销。")
-
-        # 显示对话框
-        page.dialog = delete_confirm_dialog # 将对话框实例赋给 page.dialog
-        delete_confirm_dialog.open = True     # 打开对话框
-        page.update()                       # 更新页面以显示对话框
+    # **修改点**: 移除了 confirm_delete 函数
+    # def confirm_delete(e): ... # <--- 此函数已删除
 
     # --- 绑定数据库管理按钮的事件 ---
     refresh_db_button.on_click = load_db_results       # 刷新按钮 -> 加载数据
     display_details_button.on_click = display_selected_details # 显示详情按钮 -> 显示详情
-    delete_selected_button.on_click = confirm_delete     # 删除按钮 -> 打开确认对话框
+    # **修改点**: “删除所选”按钮直接绑定到 execute_delete
+    delete_selected_button.on_click = execute_delete     # 删除按钮 -> 直接执行删除
 
     # --- ================= ---
     # --- 视图切换逻辑 ---
@@ -683,9 +657,6 @@ def main(page: ft.Page):
     # --- ========================== ---
     # --- 提交计算的核心逻辑函数 ---
     # --- ========================== ---
-
-    # --- !!! 注意：下面的 on_submit 和 run_computation 函数需要从你之前的代码中完整复制过来 !!! ---
-    # --- 确保它们能正确处理参数验证、启动后台线程、处理结果和更新 UI ---
 
     def on_submit(e):
         """处理提交按钮点击事件：验证输入，获取 run_index, 启动后台计算线程。"""
