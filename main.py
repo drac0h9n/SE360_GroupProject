@@ -2,7 +2,7 @@
 # 使用 Flet 构建图形用户界面 (GUI)。
 # 处理用户输入，调用 backend 计算，并显示结果。
 # 当 K=6 时，会将结果保存到 SQLite 数据库。
-# 包含手动输入 Universe 和手动指定覆盖条件 y 的选项。
+# 包含手动输入 Universe 和手动指定覆盖条件 c 的选项。
 # 移除了全局 RunCounter，使用 db.py 管理持久化 run_index。
 # **新增了数据库结果管理功能，允许用户查看、显示详情和删除数据库中的记录。**
 # **修改：移除了删除操作的二次确认弹窗。**
@@ -62,17 +62,17 @@ def main(page: ft.Page):
         hint_text="例如: 1 5 10 15 20 25 30 35"
     )
 
-    # --- 覆盖条件 y 输入选项 ---
-    chk_specify_y = ft.Checkbox(label="手动指定 y (覆盖次数)", value=False, on_change=None) # 复选框
-    txt_specify_y = ft.TextField(
-        label="输入 y 值 (范围 1 ~ C(j,s))", # 手动输入 y 的文本框
+    # --- 覆盖条件 c 输入选项 --- # MODIFIED: y -> c
+    chk_specify_c = ft.Checkbox(label="手动指定 c (覆盖次数)", value=False, on_change=None) # 复选框 # MODIFIED: y -> c
+    txt_specify_c = ft.TextField( # MODIFIED: y -> c
+        label="输入 c 值 (范围 1 ~ C(j,s))", # 手动输入 c 的文本框 # MODIFIED: y -> c
         visible=False,  # 初始隐藏
         width=250,      # 文本框宽度
-        hint_text="输入正整数y"
+        hint_text="输入正整数c" # MODIFIED: y -> c
     )
 
     # --- 输出/信息显示控件 ---
-    theoretical_y_info = ft.Text("理论覆盖度 (C(k,s)C(n-k,j-s)): ...", size=12) # 显示理论y值
+    theoretical_c_info = ft.Text("理论覆盖度 (C(k,s)C(n-k,j-s)): ...", size=12) # 显示理论c值 # MODIFIED: y -> c
     max_single_j_coverage = ft.Text("单j集最大覆盖 (C(j,s)): ...", size=12) # 显示 C(j,s)
     # 计算结果显示区域，允许选择文本，设置最大行数，允许内容溢出以便滚动
     sample_result_info = ft.Text(
@@ -211,7 +211,7 @@ def main(page: ft.Page):
         show_db_view_button.disabled = busy  # 计算时禁用切换数据库视图按钮
 
         # 禁用/启用计算相关的输入框和复选框
-        for ctrl in [txt_m, txt_n, txt_k, txt_j, txt_s, txt_timeout, chk_manual_univ, txt_manual_univ, chk_specify_y, txt_specify_y]:
+        for ctrl in [txt_m, txt_n, txt_k, txt_j, txt_s, txt_timeout, chk_manual_univ, txt_manual_univ, chk_specify_c, txt_specify_c]: # MODIFIED: y -> c
             ctrl.disabled = busy
 
         # 注意：数据库管理视图的按钮启用/禁用状态由其自身逻辑管理 (如选择后才启用详情/删除)
@@ -247,9 +247,9 @@ def main(page: ft.Page):
             field.update()
             return None
 
-    # --- 动态更新 y 相关信息 ---
-    def update_y_related_info(e=None):
-        """当 N, K, J, S 输入框的值改变时，重新计算并更新理论 y 值 (理论覆盖度) 和 C(j,s) (单j集最大覆盖) 的显示。"""
+    # --- 动态更新 c 相关信息 --- # MODIFIED: y -> c
+    def update_c_related_info(e=None): # MODIFIED: y -> c
+        """当 N, K, J, S 输入框的值改变时，重新计算并更新理论 c 值 (理论覆盖度) 和 C(j,s) (单j集最大覆盖) 的显示。""" # MODIFIED: y -> c
         # 安全地获取输入值，如果无效则为 None
         n_str, k_str, j_str, s_str = txt_n.value, txt_k.value, txt_j.value, txt_s.value
         n, k, j, s = None, None, None, None
@@ -265,7 +265,7 @@ def main(page: ft.Page):
         # --- 更新 C(j,s) 显示 ---
         max_single_cov_val_str = "等待有效 J, S..." # 默认提示
         max_single_j_coverage.color = ft.colors.GREY # 默认灰色
-        max_y_limit = 0 # 存储 C(j,s) 的计算结果，用于手动 y 输入框的范围提示
+        max_c_limit = 0 # 存储 C(j,s) 的计算结果，用于手动 c 输入框的范围提示 # MODIFIED: y -> c
 
         if j is not None and s is not None and j >= 0 and s >= 0: # 确保 j 和 s 是有效的非负整数
             try:
@@ -277,29 +277,29 @@ def main(page: ft.Page):
                     max_single_cov_val = comb(j, s) # 调用 backend 的 comb 函数计算组合数
                     max_single_cov_val_str = f"C({j},{s}): {max_single_cov_val}"
                     max_single_j_coverage.color = ft.colors.BLACK # 正常黑色显示
-                    max_y_limit = max_single_cov_val # 更新 y 的上限
-                # 更新手动 y 输入框的标签，提示有效范围
-                txt_specify_y.label = f"输入 y 值 (1 ~ {max_y_limit})" if max_y_limit > 0 else "输入 y 值 (无效或无需)"
-                txt_specify_y.update()
+                    max_c_limit = max_single_cov_val # 更新 c 的上限 # MODIFIED: y -> c
+                # 更新手动 c 输入框的标签，提示有效范围 # MODIFIED: y -> c
+                txt_specify_c.label = f"输入 c 值 (1 ~ {max_c_limit})" if max_c_limit > 0 else "输入 c 值 (无效或无需)" # MODIFIED: y -> c twice
+                txt_specify_c.update() # MODIFIED: y -> c
             except ValueError as combo_err: # 捕捉 comb 函数可能抛出的参数错误
                  max_single_cov_val_str = f"C({j},{s}): 计算错误 ({combo_err})"
                  max_single_j_coverage.color = ft.colors.RED # 红色错误提示
-                 txt_specify_y.label = "输入 y 值 (需有效J,S)"
-                 txt_specify_y.update()
+                 txt_specify_c.label = "输入 c 值 (需有效J,S)" # MODIFIED: y -> c
+                 txt_specify_c.update() # MODIFIED: y -> c
             except Exception as calc_err: # 捕捉其他可能的计算错误
                  max_single_cov_val_str = f"C({j},{s}): 未知错误 ({calc_err})"
                  max_single_j_coverage.color = ft.colors.RED
-                 txt_specify_y.label = "输入 y 值 (计算错误)"
-                 txt_specify_y.update()
+                 txt_specify_c.label = "输入 c 值 (计算错误)" # MODIFIED: y -> c
+                 txt_specify_c.update() # MODIFIED: y -> c
         else: # 如果 j 或 s 无效
-             txt_specify_y.label = "输入 y 值 (需有效J,S)"
-             txt_specify_y.update()
+             txt_specify_c.label = "输入 c 值 (需有效J,S)" # MODIFIED: y -> c
+             txt_specify_c.update() # MODIFIED: y -> c
         # 更新显示 C(j,s) 的文本控件
         max_single_j_coverage.value = f"单j集最大覆盖 (C(j,s)): {max_single_cov_val_str}"
 
-        # --- 更新理论 y = C(k,s)*C(n-k,j-s) 显示 ---
-        theoretical_y_val_str = "等待有效 N, K, J, S..." # 默认提示
-        theoretical_y_info.color = ft.colors.GREY       # 默认灰色
+        # --- 更新理论 c = C(k,s)*C(n-k,j-s) 显示 --- # MODIFIED: y -> c
+        theoretical_c_val_str = "等待有效 N, K, J, S..." # 默认提示 # MODIFIED: y -> c
+        theoretical_c_info.color = ft.colors.GREY       # 默认灰色 # MODIFIED: y -> c
 
         # 确保 n, k, j, s 都是有效的非负整数
         if n is not None and k is not None and j is not None and s is not None and all(v >= 0 for v in [n,k,j,s]):
@@ -310,37 +310,37 @@ def main(page: ft.Page):
                  params_logic_valid = (n >= k and n >= j) # 基础逻辑检查
 
                  if not params_logic_valid:
-                      theoretical_y_val_str = "参数无效 (N需>=K且>=J)"
-                      theoretical_y_info.color = ft.colors.ORANGE
+                      theoretical_c_val_str = "参数无效 (N需>=K且>=J)" # MODIFIED: y -> c
+                      theoretical_c_info.color = ft.colors.ORANGE # MODIFIED: y -> c
                  elif not term1_valid or not term2_valid: # 如果任一组合数参数无效
-                     theoretical_y_value = 0
+                     theoretical_c_value = 0 # MODIFIED: y -> c
                      invalid_term = ""
                      if not term1_valid: invalid_term += " C(k,s)"
                      if not term2_valid: invalid_term += " C(n-k,j-s)"
-                     theoretical_y_val_str = f"0 (因组合项无效:{invalid_term.strip()})"
-                     theoretical_y_info.color = ft.colors.BLACK # 结果是0，但原因明确，用黑色
+                     theoretical_c_val_str = f"0 (因组合项无效:{invalid_term.strip()})" # MODIFIED: y -> c
+                     theoretical_c_info.color = ft.colors.BLACK # 结果是0，但原因明确，用黑色 # MODIFIED: y -> c
                  else:
                     comb1 = comb(k, s)       # 计算 C(k,s)
                     comb2 = comb(n - k, j - s) # 计算 C(n-k, j-s)
-                    theoretical_y_value = comb1 * comb2 # 计算理论 y 值
-                    theoretical_y_val_str = f"{theoretical_y_value} (C({k},{s})={comb1} * C({n-k},{j-s})={comb2})"
-                    theoretical_y_info.color = ft.colors.BLACK # 正常黑色
+                    theoretical_c_value = comb1 * comb2 # 计算理论 c 值 # MODIFIED: y -> c twice
+                    theoretical_c_val_str = f"{theoretical_c_value} (C({k},{s})={comb1} * C({n-k},{j-s})={comb2})" # MODIFIED: y -> c twice
+                    theoretical_c_info.color = ft.colors.BLACK # 正常黑色 # MODIFIED: y -> c
             except ValueError as combo_error: # 捕捉计算组合数时的错误
-                 theoretical_y_val_str = f"计算错误 ({combo_error})"
-                 theoretical_y_info.color = ft.colors.RED
+                 theoretical_c_val_str = f"计算错误 ({combo_error})" # MODIFIED: y -> c
+                 theoretical_c_info.color = ft.colors.RED # MODIFIED: y -> c
             except Exception as calc_error:   # 捕捉其他计算错误
-                 theoretical_y_val_str = f"未知错误 ({calc_error})"
-                 theoretical_y_info.color = ft.colors.RED
-        # 更新显示理论 y 值的文本控件
-        theoretical_y_info.value = f"理论覆盖度 (C(k,s)C(n-k,j-s)): {theoretical_y_val_str}"
+                 theoretical_c_val_str = f"未知错误 ({calc_error})" # MODIFIED: y -> c
+                 theoretical_c_info.color = ft.colors.RED # MODIFIED: y -> c
+        # 更新显示理论 c 值的文本控件 # MODIFIED: y -> c
+        theoretical_c_info.value = f"理论覆盖度 (C(k,s)C(n-k,j-s)): {theoretical_c_val_str}" # MODIFIED: y -> c twice
 
         page.update() # 更新页面显示
 
     # --- 绑定 N, K, J, S 输入框的 on_change 事件 ---
-    txt_n.on_change = update_y_related_info
-    txt_k.on_change = update_y_related_info
-    txt_j.on_change = update_y_related_info
-    txt_s.on_change = update_y_related_info
+    txt_n.on_change = update_c_related_info # MODIFIED: y -> c
+    txt_k.on_change = update_c_related_info # MODIFIED: y -> c
+    txt_j.on_change = update_c_related_info # MODIFIED: y -> c
+    txt_s.on_change = update_c_related_info # MODIFIED: y -> c
 
     # --- Checkbox 事件处理 ---
     def on_manual_univ_change(e):
@@ -357,23 +357,23 @@ def main(page: ft.Page):
             manual_univ_row.visible = is_manual # 设置 Row 的可见性
         page.update() # 更新页面
 
-    def on_specify_y_change(e):
-        """当“手动指定 y”复选框状态改变时，切换对应文本框的可见性"""
-        is_manual = chk_specify_y.value
-        txt_specify_y.visible = is_manual
+    def on_specify_c_change(e): # MODIFIED: y -> c
+        """当“手动指定 c”复选框状态改变时，切换对应文本框的可见性""" # MODIFIED: y -> c
+        is_manual = chk_specify_c.value # MODIFIED: y -> c
+        txt_specify_c.visible = is_manual # MODIFIED: y -> c
         if not is_manual:
-            txt_specify_y.value = ""
-            txt_specify_y.error_text = None
-            txt_specify_y.update()
+            txt_specify_c.value = "" # MODIFIED: y -> c
+            txt_specify_c.error_text = None # MODIFIED: y -> c
+            txt_specify_c.update() # MODIFIED: y -> c
         # 同样，切换包含文本框的 Row 的可见性
-        specify_y_row = txt_specify_y.parent
-        if specify_y_row:
-            specify_y_row.visible = is_manual
+        specify_c_row = txt_specify_c.parent # MODIFIED: y -> c twice
+        if specify_c_row: # MODIFIED: y -> c
+            specify_c_row.visible = is_manual # MODIFIED: y -> c
         page.update()
 
     # --- 绑定 Checkbox 的 on_change 事件 ---
     chk_manual_univ.on_change = on_manual_univ_change
-    chk_specify_y.on_change = on_specify_y_change
+    chk_specify_c.on_change = on_specify_c_change # MODIFIED: y -> c twice
 
     # --- ================================ ---
     # --- 数据库结果管理部分的逻辑函数 ---
@@ -493,7 +493,7 @@ def main(page: ft.Page):
                     f"时间戳: {details.get('timestamp')}\n"
                     f"算法: {details.get('algorithm', 'N/A')}\n"
                     f"耗时: {details.get('time_taken', 0):.2f} 秒\n" # 格式化浮点数
-                    f"覆盖条件 (y): {details.get('y_condition', 'N/A')}\n"
+                    f"覆盖条件 (c): {details.get('c_condition', 'N/A')}\n" # MODIFIED: y -> c (twice)
                     f"Universe ({len(universe_disp) if isinstance(universe_disp, list) else 'N/A'} 个): {universe_disp}\n"
                     f"找到的集合 ({num_sets} 组):\n"
                 )
@@ -594,17 +594,17 @@ def main(page: ft.Page):
             ),
             # 复选框行
             ft.Row(
-                [chk_manual_univ, chk_specify_y],
+                [chk_manual_univ, chk_specify_c], # MODIFIED: y -> c
                 alignment=ft.MainAxisAlignment.START, spacing=20, vertical_alignment=ft.CrossAxisAlignment.CENTER
             ),
             # 手动 Universe 输入行 (通过 Row 控制显隐)
             ft.Row([txt_manual_univ], visible=chk_manual_univ.value),
-            # 手动 y 输入行 (通过 Row 控制显隐)
-            ft.Row([txt_specify_y], visible=chk_specify_y.value),
+            # 手动 c 输入行 (通过 Row 控制显隐) # MODIFIED: y -> c
+            ft.Row([txt_specify_c], visible=chk_specify_c.value), # MODIFIED: y -> c twice
             # 分隔线
             ft.Divider(height=10),
-            # 理论 y 和 C(j,s) 显示行
-            ft.Row([theoretical_y_info, max_single_j_coverage], alignment=ft.MainAxisAlignment.SPACE_AROUND),
+            # 理论 c 和 C(j,s) 显示行 # MODIFIED: y -> c
+            ft.Row([theoretical_c_info, max_single_j_coverage], alignment=ft.MainAxisAlignment.SPACE_AROUND), # MODIFIED: y -> c
             # 分隔线
             ft.Divider(height=10),
             # 操作按钮行 (计算、清日志、查看数据库)
@@ -665,7 +665,7 @@ def main(page: ft.Page):
         show_info_message(sample_result_info, "正在处理输入参数...")
 
         # --- 1. 清除旧错误提示 ---
-        for field in [txt_m, txt_n, txt_k, txt_j, txt_s, txt_timeout, txt_manual_univ, txt_specify_y]:
+        for field in [txt_m, txt_n, txt_k, txt_j, txt_s, txt_timeout, txt_manual_univ, txt_specify_c]: # MODIFIED: y -> c
             field.error_text = None
             field.update()
 
@@ -751,14 +751,14 @@ def main(page: ft.Page):
 
         if error_occurred: return # 如果处理 Universe 出错，则停止
 
-        # --- 5. 处理覆盖条件 y (根据复选框状态) ---
-        is_manual_y = chk_specify_y.value # 获取复选框状态
-        log_message(f"手动 Y 选项: {'已勾选' if is_manual_y else '未勾选'}")
-        condition_processed = None # 最终使用的 y 值
-        max_y_single_j = -1 # 存储 C(j,s) 的计算结果
+        # --- 5. 处理覆盖条件 c (根据复选框状态) --- # MODIFIED: y -> c
+        is_manual_c = chk_specify_c.value # 获取复选框状态 # MODIFIED: y -> c
+        log_message(f"手动 C 选项: {'已勾选' if is_manual_c else '未勾选'}") # MODIFIED: Y -> C, is_manual_y -> is_manual_c
+        condition_processed = None # 最终使用的 c 值 # MODIFIED: y -> c
+        max_c_single_j = -1 # 存储 C(j,s) 的计算结果 # MODIFIED: y -> c
         try: # 计算 C(j,s)
-            if j_processed >= s_processed >= 0: max_y_single_j = comb(j_processed, s_processed)
-            else: max_y_single_j = 0
+            if j_processed >= s_processed >= 0: max_c_single_j = comb(j_processed, s_processed) # MODIFIED: y -> c
+            else: max_c_single_j = 0 # MODIFIED: y -> c
         except ValueError: # 理论上之前的验证应该阻止了这个错误，但还是加上
              msg = f"错误: 计算 C(j={j_processed}, s={s_processed}) 时参数无效。"
              log_message(msg, is_error=True)
@@ -766,49 +766,49 @@ def main(page: ft.Page):
              error_occurred = True
 
         if not error_occurred: # 如果计算 C(j,s) 未出错
-            if is_manual_y: # 如果勾选了手动指定 y
-                y_str = txt_specify_y.value.strip() # 获取输入值
-                txt_specify_y.error_text = None # 清除旧错误
-                if not y_str: # 输入为空
-                    msg = "错误：勾选了手动指定 y，但输入框为空。"
+            if is_manual_c: # 如果勾选了手动指定 c # MODIFIED: y -> c
+                c_str = txt_specify_c.value.strip() # 获取输入值 # MODIFIED: y -> c twice
+                txt_specify_c.error_text = None # 清除旧错误 # MODIFIED: y -> c
+                if not c_str: # 输入为空 # MODIFIED: y -> c (variable name only)
+                    msg = "错误：勾选了手动指定 c，但输入框为空。" # MODIFIED: y -> c
                     log_message(msg, is_error=True)
                     show_info_message(sample_result_info, msg, is_error=True)
-                    txt_specify_y.error_text = "输入不能为空"
-                    txt_specify_y.update()
+                    txt_specify_c.error_text = "输入不能为空" # MODIFIED: y -> c
+                    txt_specify_c.update() # MODIFIED: y -> c
                     error_occurred = True
                 else: # 输入不为空，尝试解析和验证
                     try:
-                        specified_y = int(y_str) # 转为整数
-                        # 验证 y 的范围
-                        if specified_y < 1: raise ValueError("y 值必须至少为 1。")
-                        # 检查 y 是否超过 C(j,s)
-                        # 注意：max_y_single_j 可能为 0 (例如 j<s)，此时任何正数 y 都是无效的
-                        if max_y_single_j >= 0 and specified_y > max_y_single_j:
-                            raise ValueError(f"y ({specified_y}) 不能超过 C({j_processed},{s_processed})={max_y_single_j}。")
-                        elif max_y_single_j == 0 and specified_y > 0:
-                             raise ValueError(f"C(j,s) 为 0，无法指定正数 y ({specified_y})。")
+                        specified_c = int(c_str) # 转为整数 # MODIFIED: y -> c twice
+                        # 验证 c 的范围 # MODIFIED: y -> c
+                        if specified_c < 1: raise ValueError("c 值必须至少为 1。") # MODIFIED: y -> c twice
+                        # 检查 c 是否超过 C(j,s) # MODIFIED: y -> c
+                        # 注意：max_c_single_j 可能为 0 (例如 j<s)，此时任何正数 c 都是无效的 # MODIFIED: y -> c twice
+                        if max_c_single_j >= 0 and specified_c > max_c_single_j: # MODIFIED: y -> c twice
+                            raise ValueError(f"c ({specified_c}) 不能超过 C({j_processed},{s_processed})={max_c_single_j}。") # MODIFIED: y -> c 3 times
+                        elif max_c_single_j == 0 and specified_c > 0: # MODIFIED: y -> c twice
+                             raise ValueError(f"C(j,s) 为 0，无法指定正数 c ({specified_c})。") # MODIFIED: y -> c twice
 
-                        condition_processed = specified_y # 验证通过，使用用户指定的值
-                        log_message(f"使用手动指定的覆盖条件 y = {condition_processed}")
-                        txt_specify_y.update() # 更新以清除可能的旧错误提示
+                        condition_processed = specified_c # 验证通过，使用用户指定的值 # MODIFIED: y -> c
+                        log_message(f"使用手动指定的覆盖条件 c = {condition_processed}") # MODIFIED: y -> c
+                        txt_specify_c.update() # 更新以清除可能的旧错误提示 # MODIFIED: y -> c
                     except ValueError as ve: # 捕捉转换或范围验证错误
-                        log_message(f"手动 y 值输入错误: {ve}", is_error=True)
-                        show_info_message(sample_result_info, f"手动 y 值输入错误: {ve}", is_error=True)
-                        txt_specify_y.error_text = str(ve)
-                        txt_specify_y.update()
+                        log_message(f"手动 c 值输入错误: {ve}", is_error=True) # MODIFIED: y -> c
+                        show_info_message(sample_result_info, f"手动 c 值输入错误: {ve}", is_error=True) # MODIFIED: y -> c
+                        txt_specify_c.error_text = str(ve) # MODIFIED: y -> c
+                        txt_specify_c.update() # MODIFIED: y -> c
                         error_occurred = True
-            else: # 如果未勾选手动指定 y，则自动使用 C(j,s)
-                 condition_processed = max_y_single_j
-                 log_message(f"使用自动计算的覆盖条件 y = C(j,s) = {condition_processed}")
-                 # 后端算法应该能处理 y=0 的情况 (表示没有覆盖要求)
+            else: # 如果未勾选手动指定 c，则自动使用 C(j,s) # MODIFIED: y -> c
+                 condition_processed = max_c_single_j # MODIFIED: y -> c
+                 log_message(f"使用自动计算的覆盖条件 c = C(j,s) = {condition_processed}") # MODIFIED: y -> c
+                 # 后端算法应该能处理 c=0 的情况 (表示没有覆盖要求) # MODIFIED: y -> c
                  if condition_processed <= 0:
-                      log_message(f"警告：计算得到的 y = {condition_processed}。后端将按此执行。")
+                      log_message(f"警告：计算得到的 c = {condition_processed}。后端将按此执行。") # MODIFIED: y -> c
 
-        if error_occurred: return # 如果处理 y 出错，则停止
+        if error_occurred: return # 如果处理 c 出错，则停止 # MODIFIED: y -> c
 
         # --- 所有输入参数处理和验证完毕 ---
-        log_message(f"最终参数: M={m_processed}, N={n_processed}, K={k_processed}, J={j_processed}, S={s_processed}, 使用y={condition_processed}, Timeout={timeout_seconds}s")
-        show_info_message(sample_result_info, f"参数验证通过。\nUniverse: {univ}\ny={condition_processed}\n正在准备启动计算 (超时: {timeout_seconds} 秒)...")
+        log_message(f"最终参数: M={m_processed}, N={n_processed}, K={k_processed}, J={j_processed}, S={s_processed}, 使用c={condition_processed}, Timeout={timeout_seconds}s") # MODIFIED: y -> c
+        show_info_message(sample_result_info, f"参数验证通过。\nUniverse: {univ}\nc={condition_processed}\n正在准备启动计算 (超时: {timeout_seconds} 秒)...") # MODIFIED: y -> c
 
         # --- 6. 获取持久化的运行索引 (x) ---
         log_message("正在从数据库获取下一个运行索引...")
@@ -830,7 +830,7 @@ def main(page: ft.Page):
         try:
             # 创建 Sample 实例，传入所有参数
             sample = Sample(m=m_processed, n=n_processed, k=k_processed, j=j_processed, s=s_processed,
-                            y=condition_processed,    # 传递最终处理好的 y 值
+                            c=condition_processed,    # 传递最终处理好的 c 值 # MODIFIED: y -> c twice
                             run_idx=current_run_idx,  # 传递从数据库获取的 run_index
                             timeout=timeout_seconds,
                             rand_instance=random)     # 传递当前的随机数生成器实例
@@ -887,7 +887,7 @@ def main(page: ft.Page):
                 time_taken = sample_instance.result.get('time', 0)
                 status = sample_instance.result.get('status', 'Unknown')
                 final_run_idx = sample_instance.result.get('run_index', run_idx_local) # 确认 run_index
-                y_used = sample_instance.result.get('coverage_target', sample_instance.y) # 获取实际使用的 y
+                c_used = sample_instance.result.get('coverage_target', sample_instance.c) # 获取实际使用的 c # MODIFIED: y -> c twice
 
                 log_message(f"求解算法 (Run {final_run_idx}): {alg}, 状态: {status}, 耗时: {time_taken:.2f}s, 找到集合数: {num_sets}")
 
@@ -898,7 +898,7 @@ def main(page: ft.Page):
                     f"Universe ({len(sample_instance.univ)}个): {sample_instance.univ}\n"
                     f"算法: {alg}\n"
                     f"状态: {status}\n"
-                    f"使用y: {y_used}\n"
+                    f"使用c: {c_used}\n" # MODIFIED: y -> c twice
                     f"耗时: {time_taken:.2f} 秒\n"
                     f"找到集合 ({num_sets} 个):\n"
                 )
@@ -934,7 +934,7 @@ def main(page: ft.Page):
                         result_data = {
                             'm': sample_instance.m, 'n': sample_instance.n, 'k': sample_instance.k,
                             'j': sample_instance.j, 's': sample_instance.s, 'run_index': final_run_idx,
-                            'num_results': num_sets, 'y_condition': y_used, 'algorithm': alg,
+                            'num_results': num_sets, 'c_condition': c_used, 'algorithm': alg, # MODIFIED: y -> c twice
                             'time_taken': time_taken, 'universe': universe_str, 'sets_found': found_sets_str
                             # timestamp 会由数据库自动添加
                         }
@@ -1018,8 +1018,8 @@ def main(page: ft.Page):
     log_message(f"数据库文件路径: {os.path.abspath(db.DB_FILE)}") # 显示数据库文件位置
     log_message(f"Google OR-Tools 可用: {'是' if HAS_ORTOOLS else '否'}") # 显示 OR-Tools 状态
 
-    # 触发一次 y 相关信息的计算和显示
-    update_y_related_info()
+    # 触发一次 c 相关信息的计算和显示 # MODIFIED: y -> c
+    update_c_related_info() # MODIFIED: y -> c
 
     # 尝试初始化数据库 (创建表，如果不存在)
     try:

@@ -1,7 +1,7 @@
 # backend.py
 # 包含核心计算逻辑：贪心算法和CP-SAT（ILP）求解器
-# 版本已修改，以支持“每个 j-子集至少被覆盖 y 次”的需求。
-# **移除了 RunCounter 类，因为 run_index 的管理移到了数据库 db.py**
+# ** 版本已修改，以支持“每个 j-子集至少被覆盖 c 次”的需求 (c 代替了 y)。**
+# ** 移除了 RunCounter 类，因为 run_index 的管理移到了数据库 db.py **
 
 import random
 import time
@@ -40,32 +40,33 @@ def ksubsets(items, k):
     return list(combinations(items, k))
 
 # --- RunCounter 类已被移除 ---
-# --- 贪心算法 (已修改以支持 y 次覆盖) ---
+# --- 贪心算法 (已修改以支持 c 次覆盖) ---
 
 def greedy_cover(args):
     """
-    贪心算法求解覆盖问题，要求每个 j-子集被覆盖至少 y 次。
-    参数: (q, univ, k, j, s, y, run_idx)
+    贪心算法求解覆盖问题，要求每个 j-子集被覆盖至少 c 次。
+    参数: (q, univ, k, j, s, c, run_idx)
          q: 结果队列
          univ: 元素全集 (n 个元素)
          k: 覆盖块大小
          j: 被覆盖子集大小
          s: 交集大小阈值 (j-子集与k-块交集 >= s)
-         y: **必须覆盖的次数** (每个 j-子集需要被满足条件的 k-块覆盖至少 y 次)
+         c: **必须覆盖的次数** (每个 j-子集需要被满足条件的 k-块覆盖至少 c 次)
          run_idx: 运行索引 (由调用者提供，通过数据库管理)
     """
-    q, univ, k, j, s, y, run_idx = args # 解包参数
+    q, univ, k, j, s, c, run_idx = args # 解包参数 (c 代替 y)
     n = len(univ)
     start_time = time.time()
-    result = {'alg': 'Greedy', 'status': 'INIT', 'sets': [], 'time': 0, 'j_subsets_total': 0, 'j_subsets_covered': 0, 'coverage_target': y, 'run_index': run_idx} # 添加 coverage_target 和 run_index
+    # !!! 修改: coverage_target 使用 c
+    result = {'alg': 'Greedy', 'status': 'INIT', 'sets': [], 'time': 0, 'j_subsets_total': 0, 'j_subsets_covered': 0, 'coverage_target': c, 'run_index': run_idx}
 
-    print(f"[Greedy-{run_idx}] 开始执行贪心算法 (覆盖目标 y={y})...")
+    print(f"[Greedy-{run_idx}] 开始执行贪心算法 (覆盖目标 c={c})...") # !!! 修改: y -> c
 
     # 基本参数检查
-    if y <= 0:
-        print(f"[Greedy-{run_idx}] 错误：覆盖次数 y ({y}) 必须大于 0。")
-        result['status'] = 'ERROR_INVALID_Y'
-        result['error_message'] = f"覆盖次数 y ({y}) 必须大于 0。"
+    if c <= 0: # !!! 修改: y -> c
+        print(f"[Greedy-{run_idx}] 错误：覆盖次数 c ({c}) 必须大于 0。") # !!! 修改: y -> c
+        result['status'] = 'ERROR_INVALID_C' # !!! 修改: y -> c
+        result['error_message'] = f"覆盖次数 c ({c}) 必须大于 0。" # !!! 修改: y -> c
         result['time'] = time.time() - start_time
         q.put(result)
         return
@@ -81,7 +82,7 @@ def greedy_cover(args):
         target_j_subsets = [set(subset) for subset in target_j_subsets_tuples]
         num_j_subsets = len(target_j_subsets)
         result['j_subsets_total'] = num_j_subsets
-        print(f"[Greedy-{run_idx}] 需要覆盖 {num_j_subsets} 个 j-子集，每个至少 {y} 次。")
+        print(f"[Greedy-{run_idx}] 需要覆盖 {num_j_subsets} 个 j-子集，每个至少 {c} 次。") # !!! 修改: y -> c
 
         if num_j_subsets == 0:
              print(f"[Greedy-{run_idx}] 没有需要覆盖的 j-子集，直接完成。")
@@ -100,27 +101,28 @@ def greedy_cover(args):
                     j_subset_covered_by_k_indices[idx_j].append(idx_k)
         print(f"[Greedy-{run_idx}] 预计算覆盖关系完成。")
 
-        # 检查是否有 j-子集根本无法被覆盖 y 次
+        # 检查是否有 j-子集根本无法被覆盖 c 次
         for idx_j in range(num_j_subsets):
              potential_covers = len(j_subset_covered_by_k_indices[idx_j])
-             if potential_covers < y:
-                 print(f"[Greedy-{run_idx}] 错误：j-子集 {idx_j} ({target_j_subsets[idx_j]}) 最多只能被 {potential_covers} 个 k-子集覆盖，无法满足 y={y} 的要求。问题不可行。")
-                 result['status'] = 'INFEASIBLE_Y_TARGET'
-                 result['error_message'] = f"j-子集 {idx_j} 无法被覆盖 {y} 次。"
+             if potential_covers < c: # !!! 修改: y -> c
+                 print(f"[Greedy-{run_idx}] 错误：j-子集 {idx_j} ({target_j_subsets[idx_j]}) 最多只能被 {potential_covers} 个 k-子集覆盖，无法满足 c={c} 的要求。问题不可行。") # !!! 修改: y -> c
+                 result['status'] = 'INFEASIBLE_C_TARGET' # !!! 修改: Y -> C
+                 result['error_message'] = f"j-子集 {idx_j} 无法被覆盖 {c} 次。" # !!! 修改: y -> c
                  result['time'] = time.time() - start_time
                  q.put(result)
                  return
 
-        # 4. 贪心选择过程 (面向 y 次覆盖)
+        # 4. 贪心选择过程 (面向 c 次覆盖)
         selected_k_subset_indices = [] # 存储选中的 k-子集的索引
         # 跟踪每个 j-子集的当前覆盖次数
         j_subset_coverage_count = [0] * num_j_subsets
-        # 跟踪哪些 j-子集还需要更多覆盖 (覆盖次数 < y)
+        # 跟踪哪些 j-子集还需要更多覆盖 (覆盖次数 < c)
+        # !!! 修改: y -> c
         needs_more_coverage_j_indices = set(range(num_j_subsets))
-        print(f"[Greedy-{run_idx}] 开始贪心选择，目标 y={y}...")
+        print(f"[Greedy-{run_idx}] 开始贪心选择，目标 c={c}...") # !!! 修改: y -> c
 
         iteration = 0
-        # 循环直到所有 j-子集的覆盖次数都达到 y
+        # 循环直到所有 j-子集的覆盖次数都达到 c
         while needs_more_coverage_j_indices:
             iteration += 1
             best_k_subset_idx = -1
@@ -144,13 +146,11 @@ def greedy_cover(args):
                         can_cover_anything = True
                         break
                 if not can_cover_anything and needs_more_coverage_j_indices:
-                    # 如果确实没有任何块能覆盖剩下的了（这通常意味着问题从一开始就不可行，但预检查可能漏掉极端情况）
-                    print(f"[Greedy-{run_idx}] 错误：在迭代 {iteration} 中，没有任何剩余的 k-块可以覆盖任何仍未满足 y={y} 覆盖的 j-子集。问题可能不可行或贪心策略无法找到解。")
+                    # 如果确实没有任何块能覆盖剩下的了
+                    # !!! 修改: y -> c
+                    print(f"[Greedy-{run_idx}] 错误：在迭代 {iteration} 中，没有任何剩余的 k-块可以覆盖任何仍未满足 c={c} 覆盖的 j-子集。问题可能不可行或贪心策略无法找到解。")
                     result['status'] = 'FAILED_INFEASIBLE_REMAINING'
                     result['error_message'] = "Greedy search cannot find any k-subset to cover remaining j-subsets."
-                # elif max_coverage_increase_count <= 0: # 原来的判断条件，如果设为0，可能导致无限循环或提前错误退出
-                #     print(f"[Greedy-{run_idx}] 警告：在迭代 {iteration} 中找不到能为任何未满足覆盖的 j-子集 *增加* 覆盖的 k-子集（增益<=0）。可能存在问题或算法逻辑错误。")
-                #     result['status'] = 'FAILED_NO_PROGRESS'
                 else:
                     # 保持原来的警告，以防是其他逻辑问题
                     print(f"[Greedy-{run_idx}] 警告：在迭代 {iteration} 中找不到最佳 k-子集 (best_k_subset_idx = -1)。可能存在问题。")
@@ -170,17 +170,17 @@ def greedy_cover(args):
                 # 只更新那些还需要覆盖的
                 if idx_j in needs_more_coverage_j_indices:
                     j_subset_coverage_count[idx_j] += 1
-                    # 检查是否刚刚满足 y 次覆盖
-                    if j_subset_coverage_count[idx_j] >= y:
+                    # 检查是否刚刚满足 c 次覆盖
+                    if j_subset_coverage_count[idx_j] >= c: # !!! 修改: y -> c
                         needs_more_coverage_j_indices.remove(idx_j) # 从待覆盖集合中移除
                         newly_satisfied_count += 1
 
-            print(f"[Greedy-{run_idx}]   -> 本轮选择后 {newly_satisfied_count} 个 j-子集达到 y={y} 覆盖目标。")
+            print(f"[Greedy-{run_idx}]   -> 本轮选择后 {newly_satisfied_count} 个 j-子集达到 c={c} 覆盖目标。") # !!! 修改: y -> c
             print(f"[Greedy-{run_idx}]   -> 剩余 {len(needs_more_coverage_j_indices)} 个 j-子集待满足。")
 
             # 添加一个迭代次数上限防止死循环
-            # 一个更合理的上限可能是 C(n,k)，即所有可能的块数，如果允许重复选择块可能需要更大
-            max_iterations = len(all_k_subsets) * y # 粗略上限
+            # !!! 修改: y -> c
+            max_iterations = len(all_k_subsets) * c # 粗略上限
             if iteration > max_iterations and max_iterations > 0:
                   print(f"[Greedy-{run_idx}] 警告：迭代次数过多 ({iteration} > {max_iterations})，可能陷入循环或收敛缓慢。提前终止。")
                   result['status'] = 'FAILED_ITERATION_LIMIT'
@@ -191,14 +191,15 @@ def greedy_cover(args):
         result['sets'] = chosen_sets_list
         result['j_subsets_covered'] = num_j_subsets - len(needs_more_coverage_j_indices) # 最终满足条件的 j-子集数量
 
-        if not needs_more_coverage_j_indices: # 如果所有 j-子集都满足了 y 次覆盖
+        if not needs_more_coverage_j_indices: # 如果所有 j-子集都满足了 c 次覆盖
             result['status'] = 'SUCCESS'
-            print(f"[Greedy-{run_idx}] 贪心算法成功完成 y={y} 覆盖，共选择 {len(chosen_sets_list)} 个集合。")
+            print(f"[Greedy-{run_idx}] 贪心算法成功完成 c={c} 覆盖，共选择 {len(chosen_sets_list)} 个集合。") # !!! 修改: y -> c
         else:
             # 如果循环退出但仍有未满足的
             if result['status'] == 'INIT': # 如果状态未被错误或迭代限制覆盖
                 result['status'] = 'FAILED_INCOMPLETE_COVER' # 默认失败状态
-            print(f"[Greedy-{run_idx}] 贪心算法结束，状态: {result['status']}。{result['j_subsets_covered']}/{num_j_subsets} 个 j-子集满足了 y={y} 覆盖。选择了 {len(chosen_sets_list)} 个集合。")
+            # !!! 修改: y -> c
+            print(f"[Greedy-{run_idx}] 贪心算法结束，状态: {result['status']}。{result['j_subsets_covered']}/{num_j_subsets} 个 j-子集满足了 c={c} 覆盖。选择了 {len(chosen_sets_list)} 个集合。")
 
     except Exception as e:
         print(f"[Greedy-{run_idx}] 贪心算法执行出错: {e}")
@@ -216,37 +217,40 @@ def greedy_cover(args):
         except Exception as qe:
              print(f"[Greedy-{run_idx}] 错误：无法将结果放入队列: {qe}")
 
-# --- CP-SAT (ILP) 求解器 (已修改以支持 y 次覆盖) ---
+# --- CP-SAT (ILP) 求解器 (已修改以支持 c 次覆盖) ---
 
 def cpsat_cover(args):
     """
-    使用 OR-Tools CP-SAT 求解器解决覆盖问题，要求每个 j-子集被覆盖至少 y 次。
-    参数: (q, univ, k, j, s, y, run_idx, timeout_solver)
+    使用 OR-Tools CP-SAT 求解器解决覆盖问题，要求每个 j-子集被覆盖至少 c 次。
+    参数: (q, univ, k, j, s, c, run_idx, timeout_solver)
          q: 结果队列
          univ: 元素全集
          k: 覆盖块大小
          j: 被覆盖子集大小
          s: 交集大小阈值 (>= s)
-         y: **必须覆盖的次数**
+         c: **必须覆盖的次数**
          run_idx: 运行索引 (由调用者提供，通过数据库管理)
          timeout_solver: CP-SAT 求解器的内部超时时间（秒）
     """
     if not HAS_ORTOOLS:
-        q.put({'alg': 'ILP', 'status': 'ERROR_MISSING_ORTOOLS', 'sets': [], 'time': 0, 'coverage_target': y, 'run_index': args[6]}) # 包含 run_idx
+        # !!! 修改: y -> c
+        q.put({'alg': 'ILP', 'status': 'ERROR_MISSING_ORTOOLS', 'sets': [], 'time': 0, 'coverage_target': args[5], 'run_index': args[6]}) # 包含 run_idx
         return
 
-    q, univ, k, j, s, y, run_idx, timeout_solver = args # 解包参数
+    # !!! 修改: y -> c
+    q, univ, k, j, s, c, run_idx, timeout_solver = args # 解包参数
     n = len(univ)
     start_time = time.time()
-    result = {'alg': 'ILP', 'status': 'INIT', 'sets': [], 'time': 0, 'coverage_target': y, 'run_index': run_idx} # 添加 coverage_target 和 run_index
+    # !!! 修改: coverage_target 使用 c
+    result = {'alg': 'ILP', 'status': 'INIT', 'sets': [], 'time': 0, 'coverage_target': c, 'run_index': run_idx}
 
-    print(f"[ILP-{run_idx}] 开始执行 CP-SAT 求解器 (覆盖目标 y={y})... Timeout={timeout_solver}s")
+    print(f"[ILP-{run_idx}] 开始执行 CP-SAT 求解器 (覆盖目标 c={c})... Timeout={timeout_solver}s") # !!! 修改: y -> c
 
     # 基本参数检查
-    if y <= 0:
-        print(f"[ILP-{run_idx}] 错误：覆盖次数 y ({y}) 必须大于 0。")
-        result['status'] = 'ERROR_INVALID_Y'
-        result['error_message'] = f"覆盖次数 y ({y}) 必须大于 0。"
+    if c <= 0: # !!! 修改: y -> c
+        print(f"[ILP-{run_idx}] 错误：覆盖次数 c ({c}) 必须大于 0。") # !!! 修改: y -> c
+        result['status'] = 'ERROR_INVALID_C' # !!! 修改: Y -> C
+        result['error_message'] = f"覆盖次数 c ({c}) 必须大于 0。" # !!! 修改: y -> c
         result['time'] = time.time() - start_time
         q.put(result)
         return
@@ -263,7 +267,7 @@ def cpsat_cover(args):
         target_j_subsets_tuples = list(combinations(univ, j))
         target_j_subsets = [frozenset(subset) for subset in target_j_subsets_tuples]
         num_j_subsets = len(target_j_subsets)
-        print(f"[ILP-{run_idx}] 需要覆盖 {num_j_subsets} 个 j-子集，每个至少 {y} 次。")
+        print(f"[ILP-{run_idx}] 需要覆盖 {num_j_subsets} 个 j-子集，每个至少 {c} 次。") # !!! 修改: y -> c
 
         if num_j_subsets == 0:
             print(f"[ILP-{run_idx}] 没有需要覆盖的 j-子集，直接完成。")
@@ -278,8 +282,8 @@ def cpsat_cover(args):
         # 4. 定义变量: 每个 k-子集是否被选中 (0 或 1)
         x = [model.NewBoolVar(f'x_{i}') for i in range(num_k_subsets)]
 
-        # 5. 定义约束: 每个 j-子集必须被至少 y 个满足条件的 k-子集覆盖
-        print(f"[ILP-{run_idx}] 开始添加约束 (每个 j-子集 >= {y} 次覆盖)...")
+        # 5. 定义约束: 每个 j-子集必须被至少 c 个满足条件的 k-子集覆盖
+        print(f"[ILP-{run_idx}] 开始添加约束 (每个 j-子集 >= {c} 次覆盖)...") # !!! 修改: y -> c
         constraints_added = 0
         feasible = True # 标记模型是否可能可行
         j_subset_potential_covers = defaultdict(list) # 预计算哪些k块可以覆盖每个j块
@@ -291,25 +295,20 @@ def cpsat_cover(args):
         for idx_j, j_subset in enumerate(target_j_subsets):
             # 找到所有与当前 j_subset 交集 >= s 的 k_subsets 的索引
             covering_k_indices = j_subset_potential_covers[idx_j]
-            # covering_k_indices = [
-            #     k_subset_indices[k_subset]
-            #     for k_subset in all_k_subsets # 这里效率较低，改为预计算
-            #     if len(j_subset.intersection(k_subset)) >= s
-            # ]
 
-            # 检查是否有足够的 k-子集来满足 y 次覆盖
-            if len(covering_k_indices) < y:
-                print(f"[ILP-{run_idx}] 错误：j-子集 {idx_j} ({set(j_subset)}) 最多只能被 {len(covering_k_indices)} 个 k-子集覆盖，无法满足 y={y} 的要求。问题不可行。")
+            # 检查是否有足够的 k-子集来满足 c 次覆盖
+            if len(covering_k_indices) < c: # !!! 修改: y -> c
+                print(f"[ILP-{run_idx}] 错误：j-子集 {idx_j} ({set(j_subset)}) 最多只能被 {len(covering_k_indices)} 个 k-子集覆盖，无法满足 c={c} 的要求。问题不可行。") # !!! 修改: y -> c
                 result['status'] = 'INFEASIBLE' # 直接标记为不可行
                 feasible = False
                 break # 不再添加后续约束，因为已经确定不可行
 
-            # 添加约束：这些候选 k-子集被选中的数量必须 >= y
+            # 添加约束：这些候选 k-子集被选中的数量必须 >= c
             if covering_k_indices: # 只有在有潜在覆盖块时才添加约束
-                model.Add(sum(x[i] for i in covering_k_indices) >= y) # <--- 核心修改：>= y
+                model.Add(sum(x[i] for i in covering_k_indices) >= c) # <--- 核心修改：>= c
                 constraints_added += 1
-            else: # 如果一个 j-子集没有任何 k-子集能覆盖（且 y>=1），则不可行
-                if y >= 1:
+            else: # 如果一个 j-子集没有任何 k-子集能覆盖（且 c>=1），则不可行
+                if c >= 1: # !!! 修改: y -> c
                     print(f"[ILP-{run_idx}] 错误：j-子集 {idx_j} ({set(j_subset)}) 没有任何 k-子集能满足交集 >= {s}。问题不可行。")
                     result['status'] = 'INFEASIBLE'
                     feasible = False
@@ -361,7 +360,7 @@ def cpsat_cover(args):
         elif status == cp_model.UNKNOWN:
              print(f"[ILP-{run_idx}] 求解器在 {timeout_solver} 秒内未能找到最优解或证明不可行。可能是超时或问题复杂。")
         elif status == cp_model.INFEASIBLE:
-             print(f"[ILP-{run_idx}] 模型被证明不可行，不存在满足 y={y} 覆盖条件的解。")
+             print(f"[ILP-{run_idx}] 模型被证明不可行，不存在满足 c={c} 覆盖条件的解。") # !!! 修改: y -> c
         else:
              print(f"[ILP-{run_idx}] 求解器返回未处理状态：{result['status']}")
 
@@ -389,7 +388,8 @@ class Sample:
     """
     代表一次计算实例，负责管理参数、运行算法、收集结果。
     """
-    def __init__(self, m, n, k, j, s, y, run_idx, timeout=60, rand_instance=None):
+    # !!! 修改: y -> c in __init__ signature and docstring
+    def __init__(self, m, n, k, j, s, c, run_idx, timeout=60, rand_instance=None):
         """
         初始化 Sample 实例。
 
@@ -399,7 +399,7 @@ class Sample:
             k (int): 每个覆盖块 (Set) 的大小
             j (int): 需要被覆盖的子集的大小
             s (int): j-子集中必须与覆盖块 (Set) 共享的元素数量的最小值 (>=s)
-            y (int): **覆盖次数要求** (每个 j-子集要被覆盖 >= y 次)
+            c (int): **覆盖次数要求** (每个 j-子集要被覆盖 >= c 次)
             run_idx (int): 运行唯一标识符 (从数据库获取，跨会话持久)
             timeout (int): 整个 run 方法的总超时时间 (秒)
             rand_instance (random.Random, 可选): 用于生成宇宙的随机数生成器实例
@@ -409,7 +409,7 @@ class Sample:
         self.k = k
         self.j = j
         self.s = s
-        self.y = y # 存储实际使用的覆盖次数要求
+        self.c = c # !!! 修改: 存储实际使用的覆盖次数要求 (c 代替 y)
         self.run_idx = run_idx # !! 这个 run_idx 是从数据库获取的持久化索引
         self.timeout = timeout
         self.rand = rand_instance if rand_instance else random
@@ -421,7 +421,8 @@ class Sample:
         self.sets = []        # 存储选定算法找到的覆盖集列表
         self.ans = None       # 最终格式化的结果字符串
 
-        print(f"[Sample-{self.run_idx}] 初始化实例: M={m}, N={n}, K={k}, J={j}, S={s}, Target_Y={y}, RunIndex={run_idx}, Timeout={timeout}s") # 显示 run_idx
+        # !!! 修改: Target_Y -> Target_C, {y} -> {c}
+        print(f"[Sample-{self.run_idx}] 初始化实例: M={m}, N={n}, K={k}, J={j}, S={s}, Target_C={c}, RunIndex={run_idx}, Timeout={timeout}s") # 显示 run_idx
 
         # 1. 生成宇宙 (Universe)
         if n > m:
@@ -441,9 +442,9 @@ class Sample:
     def run(self):
         """
         启动 Greedy 和 CP-SAT (如果可用) 算法并行计算，并根据结果选择最佳方案。
-        算法现在应该使用 self.y 作为覆盖次数目标。
+        算法现在应该使用 self.c 作为覆盖次数目标。
         """
-        print(f"[RUN-{self.run_idx}] 开始运行并行计算 (目标 y={self.y})...")
+        print(f"[RUN-{self.run_idx}] 开始运行并行计算 (目标 c={self.c})...") # !!! 修改: y -> c
 
         # 检查 Universe 是否有效
         if not self.univ or len(self.univ) != self.n:
@@ -461,15 +462,16 @@ class Sample:
         processes = []
 
         # -- 准备参数元组 --
-        # y 值现在是关键参数，传递给算法
-        common_args = (self.q, self.univ, self.k, self.j, self.s, self.y, self.run_idx) # run_idx 现在是持久化的
+        # c 值现在是关键参数，传递给算法 (self.c 代替 self.y)
+        common_args = (self.q, self.univ, self.k, self.j, self.s, self.c, self.run_idx) # run_idx 现在是持久化的
 
         # -- 启动 Greedy 进程 --
         args_greedy = common_args
         p_greedy = mp.Process(target=greedy_cover, args=(args_greedy,), daemon=True)
         processes.append(p_greedy)
+        # !!! 修改: y -> c
         p_greedy.start()
-        print(f"[RUN-{self.run_idx}] 启动了 Greedy 进程 (PID: {p_greedy.pid}, 目标 y={self.y})")
+        print(f"[RUN-{self.run_idx}] 启动了 Greedy 进程 (PID: {p_greedy.pid}, 目标 c={self.c})")
 
         # -- 启动 CP-SAT 进程 (如果可用) --
         p_ilp = None
@@ -482,7 +484,8 @@ class Sample:
             p_ilp = mp.Process(target=cpsat_cover, args=(args_ilp,), daemon=True)
             processes.append(p_ilp)
             p_ilp.start()
-            print(f"[RUN-{self.run_idx}] 启动了 CP-SAT (ILP) 进程 (PID: {p_ilp.pid}, 目标 y={self.y}), 内部超时 {timeout_solver:.1f}s")
+            # !!! 修改: y -> c
+            print(f"[RUN-{self.run_idx}] 启动了 CP-SAT (ILP) 进程 (PID: {p_ilp.pid}, 目标 c={self.c}), 内部超时 {timeout_solver:.1f}s")
         else:
             print(f"[RUN-{self.run_idx}] CP-SAT (ILP) 求解器不可用，仅运行 Greedy。")
 
@@ -544,7 +547,6 @@ class Sample:
                     print(f"[RUN-{self.run_idx}] 警告：ILP 报告 {ilp_res.get('status')} 但缺少有效 'sets'。尝试回退。")
 
             # 优先级 2: 如果 ILP 未选中，且 Greedy 成功 ('SUCCESS')
-            # **重要**: 确保 greedy_cover 成功时 status 是 'SUCCESS'
             if selected_result is None and greedy_res and greedy_res.get('status') == 'SUCCESS':
                  if 'sets' in greedy_res and greedy_res.get('sets') is not None:
                     print(f"[RUN-{self.run_idx}] **选择 Greedy 结果** (状态: {greedy_res.get('status')}, 集合数: {len(greedy_res['sets'])}). (ILP 不适用或未成功)")
@@ -559,7 +561,7 @@ class Sample:
                 if ilp_res:
                     print(f"[RUN-{self.run_idx}] **选择 ILP 结果作为回退** (状态: {ilp_res.get('status', 'N/A')})")
                     selected_result = ilp_res
-                # 其次选择 Greedy 结果（即使它不是 'SUCCESS'，例如 'FAILED_INCOMPLETE' 或 'ERROR'）
+                # 其次选择 Greedy 结果（即使它不是 'SUCCESS'）
                 elif greedy_res:
                     print(f"[RUN-{self.run_idx}] **选择 Greedy 结果作为回退** (状态: {greedy_res.get('status', 'N/A')})")
                     selected_result = greedy_res
@@ -571,12 +573,6 @@ class Sample:
                     self.result = {'status': 'NoResult', 'alg': 'None', 'sets': [], 'time': total_wait_time, 'run_index': self.run_idx}
                     self.sets = []
 
-        # except queue.Empty: # 第一个 get 超时
-        #     total_wait_time = time.time() - time_start_wait
-        #     print(f"[RUN-{self.run_idx}] 错误：在 {total_wait_time:.2f} 秒内 (超时 {self.timeout:.1f}s) 未收到任何算法的结果。")
-        #     self.ans = f"Fail: Timeout ({self.timeout:.1f}s)"
-        #     self.result = {'status': 'Timeout', 'alg': 'None', 'sets': [], 'time': total_wait_time, 'run_index': self.run_idx}
-        #     self.sets = []
         except (queue.Empty, TimeoutError) as toe:
              total_wait_time = time.time() - time_start_wait
              print(f"[RUN-{self.run_idx}] 错误：在 {total_wait_time:.2f} 秒内未收到预期的结果 ({type(toe).__name__})。总超时为 {self.timeout:.1f}s。")
@@ -603,7 +599,7 @@ class Sample:
              self.sets = self.result.get('sets', []) if self.result else []
 
         except Exception as e:
-            total_time = time.time() - time_start_wait # 使用 time.time() 而不是 time_start_wait
+            total_time = time.time() - time_start_wait
             print(f"[RUN-{self.run_idx}] 处理结果时发生意外错误: {e}")
             import traceback
             traceback.print_exc()
@@ -645,19 +641,20 @@ class Sample:
             num_results = len(self.sets) if isinstance(self.sets, list) else 0
 
             # 构建标准答案字符串: m-n-k-j-s-run_idx-num_sets
-            # run_idx 现在是持久化的
             self.ans = f"{self.m}-{self.n}-{self.k}-{self.j}-{self.s}-{self.run_idx}-{num_results}"
 
             final_alg = self.result.get('alg', 'N/A')
             final_status = self.result.get('status', 'N/A')
             final_time = self.result.get('time', 0)
-            cov_target = self.result.get('coverage_target', self.y) # 获取算法实际使用的 y
+            # !!! 修改: 默认值使用 self.c, Key 使用 'coverage_target'
+            cov_target = self.result.get('coverage_target', self.c)
             final_run_idx = self.result.get('run_index', self.run_idx) # 确认 run_index
 
             print(f"[RUN-{final_run_idx}] ---- Final Result Summary ----")
             print(f"[RUN-{final_run_idx}] Selected Algorithm: {final_alg}")
             print(f"[RUN-{final_run_idx}] Status: {final_status}")
-            print(f"[RUN-{final_run_idx}] Coverage Target (y): {cov_target}")
+            # !!! 修改: y -> c
+            print(f"[RUN-{final_run_idx}] Coverage Target (c): {cov_target}")
             print(f"[RUN-{final_run_idx}] Time (internal): {final_time:.2f}s")
             print(f"[RUN-{final_run_idx}] Sets Found: {num_results}")
             print(f"[RUN-{final_run_idx}] Result ID (ans): {self.ans}")
@@ -676,16 +673,17 @@ class Sample:
         # 在 run 方法结束前返回，确保 main.py 可以继续执行
         return
 
-# --- 主程序入口 (用于直接测试 backend.py, 但现在依赖 db.py 获取 run_index) ---
+# --- 主程序入口 (用于直接测试 backend.py) ---
 if __name__ == '__main__':
-    print("backend.py 被直接运行。进行 y 次覆盖测试...")
+    # !!! 修改: y -> c
+    print("backend.py 被直接运行。进行 c 次覆盖测试...")
     print("注意: 直接运行 backend.py 现在依赖 db.py 来获取 run_index。")
     print("将使用默认数据库文件 'k6_results.db' 来获取/更新索引。")
 
     # 导入 db 模块（如果尚未导入）
     try:
         import db as test_db
-        test_db.setup_database() # 确保数据库和表存在
+        test_db.setup_database() # 确保数据库和表存在 (列名 c_condition)
     except ImportError:
         print("错误：无法导入 db.py。请确保 db.py 在同一目录下或 Python 路径中。")
         exit()
@@ -699,10 +697,11 @@ if __name__ == '__main__':
     test_k = 4
     test_j = 3
     test_s = 2
-    test_y = 2 # 要求每个 j-子集被覆盖至少 2 次
+    test_c = 2 # !!! 修改: test_y -> test_c
     test_timeout = 45 # 秒
 
-    print(f"\n测试参数: M={test_m}, N={test_n}, K={test_k}, J={test_j}, S={test_s}, Y={test_y}, Timeout={test_timeout}s")
+    # !!! 修改: Y -> C
+    print(f"\n测试参数: M={test_m}, N={test_n}, K={test_k}, J={test_j}, S={test_s}, C={test_c}, Timeout={test_timeout}s")
 
     try:
         # 获取持久化的 run_index
@@ -713,11 +712,12 @@ if __name__ == '__main__':
         print(f"从数据库获取的本次运行索引: {test_run_idx}")
 
         test_random_instance = random.Random(0) # 固定种子
-        sample_instance = Sample(test_m, test_n, test_k, test_j, test_s, test_y,
+        # !!! 修改: test_y -> test_c in Sample instantiation
+        sample_instance = Sample(test_m, test_n, test_k, test_j, test_s, test_c,
                                  test_run_idx, # 使用从数据库获取的索引
                                  test_timeout, test_random_instance)
 
-        # 手动设置一个 Universe (如果需要，否则 Sample 会在 run 时自己生成)
+        # 手动设置一个 Universe
         sample_instance.univ = sorted(test_random_instance.sample(range(1, test_m + 1), test_n))
         print(f"设置 Universe: {sample_instance.univ}")
 
@@ -725,16 +725,15 @@ if __name__ == '__main__':
 
         print("\n--- 测试运行结果 ---")
         print(f"最终结果标识 (ans): {sample_instance.ans}")
+        # sample_instance.result['coverage_target'] 现在应该是 c 的值
         print(f"选择的算法结果 (result): {sample_instance.result}")
         print(f"找到的集合 (sets):")
         if sample_instance.sets:
-            # 可能非常多，只打印前几个
             MAX_SETS_PRINT = 20
             for i, found_set in enumerate(sample_instance.sets[:MAX_SETS_PRINT]):
                 print(f"  Set {i+1}: {found_set}")
             if len(sample_instance.sets) > MAX_SETS_PRINT:
                 print(f"  ... (还有 {len(sample_instance.sets) - MAX_SETS_PRINT} 个集合未打印)")
-
         else:
             print("  未能找到任何集合。")
 

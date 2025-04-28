@@ -2,6 +2,7 @@
 # 数据库操作模块
 # 修改 delete_result 函数，使其在删除具有最高 run_index 的记录时，
 # 相应地递减 run_counters 表中的 last_run_index。
+# ** 已将所有涉及覆盖次数的变量/列名从 'y' 修改为 'c' **
 
 import sqlite3
 import json
@@ -26,7 +27,7 @@ def setup_database(db_file=DB_FILE):
         conn = sqlite3.connect(db_file)
         cursor = conn.cursor()
 
-        # --- 创建 results 表 ---
+        # --- 创建 results 表 (!!! 列名 y_condition 已改为 c_condition !!!) ---
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS results (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -37,7 +38,7 @@ def setup_database(db_file=DB_FILE):
                 s INTEGER NOT NULL,
                 run_index INTEGER NOT NULL,
                 num_results INTEGER NOT NULL,
-                y_condition INTEGER,
+                c_condition INTEGER, -- !!! 已修改: y_condition -> c_condition
                 algorithm TEXT,
                 time_taken REAL,
                 universe TEXT,
@@ -46,7 +47,7 @@ def setup_database(db_file=DB_FILE):
                 UNIQUE(m, n, k, j, s, run_index)
             )
         ''')
-        print("数据库表 'results' 已准备就绪。")
+        print("数据库表 'results' 已准备就绪。 (注意: c_condition 列)")
 
         # --- 创建 run_counters 表 ---
         cursor.execute('''
@@ -135,6 +136,7 @@ def save_result(result_data, db_file=DB_FILE):
     Args:
         result_data (dict): 包含运行结果的字典，键应与表列名对应。
                              必须包含 'm', 'n', 'k', 'j', 's', 'run_index' 等。
+                             现在应使用 'c_condition' 而不是 'y_condition'。
         db_file (str): 数据库文件的路径。
 
     Returns:
@@ -175,7 +177,7 @@ def save_result(result_data, db_file=DB_FILE):
         if conn:
             conn.close()
 
-# --- 数据查询函数 (保持不变) ---
+# --- 数据查询函数 (保持不变, 但注意返回的字典键现在是 c_condition) ---
 def get_all_results(db_file=DB_FILE):
     conn = None
     try:
@@ -184,7 +186,7 @@ def get_all_results(db_file=DB_FILE):
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM results ORDER BY timestamp DESC")
         rows = cursor.fetchall()
-        return [dict(row) for row in rows]
+        return [dict(row) for row in rows] # 注意：这里会自动包含 c_condition 列
     except sqlite3.Error as e:
         print(f"数据库查询错误 (查询 results 表): {e}")
         return []
@@ -213,8 +215,9 @@ def get_results_summary(db_file=DB_FILE):
         conn = sqlite3.connect(db_file)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
+        # 选择需要的列，包括 c_condition
         cursor.execute("""
-            SELECT id, m, n, k, j, s, run_index, num_results, timestamp
+            SELECT id, m, n, k, j, s, run_index, num_results, c_condition, timestamp
             FROM results
             ORDER BY timestamp DESC
         """)
@@ -235,10 +238,10 @@ def get_result_details(result_id, db_file=DB_FILE):
         conn = sqlite3.connect(db_file)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM results WHERE id = ?", (result_id,))
+        cursor.execute("SELECT * FROM results WHERE id = ?", (result_id,)) # 选择所有列
         row = cursor.fetchone()
         if row:
-            details = dict(row)
+            details = dict(row) # details['c_condition'] 将会存在（如果数据库有此列）
             # 尝试解析 JSON 字段
             try:
                 details['sets_found_parsed'] = json.loads(details['sets_found']) if details.get('sets_found') else []
@@ -259,6 +262,9 @@ def get_result_details(result_id, db_file=DB_FILE):
         print(f"数据库查询错误 (获取详情 ID={result_id}): {e}")
     finally:
         if conn: conn.close()
+    # 注意: 返回的 details 字典现在将包含 'c_condition' 键 (如果该列存在于数据库中)
+    # 示例格式化字符串现在需要使用 'c_condition'
+    # f"覆盖条件 (c): {details.get('c_condition', 'N/A')}\n"
     return details
 
 # --- 数据删除 (核心修改) ---
@@ -375,7 +381,7 @@ if __name__ == '__main__':
         mock_data.update({
             'run_index': run_idx,
             'num_results': num_results,
-            'y_condition': params['s'], # 模拟
+            'c_condition': params['s'], # !!! 已修改: y_condition -> c_condition (这里只是用s模拟，实际c应由外部传入)
             'algorithm': 'MOCK',
             'time_taken': 0.1,
             'universe': json.dumps(list(range(1, params['n']+1))),
@@ -406,9 +412,9 @@ if __name__ == '__main__':
 
     print("\n当前计数器状态:")
     counters = get_all_counters(db_file=test_db_file)
-    for c in counters:
-        if c['m'] == test_params['m'] and c['s'] == test_params['s']: # 简单过滤
-            print(f"  Params: {c['m']}-{c['n']}-{c['k']}-{c['j']}-{c['s']}, LastIndex: {c['last_run_index']}")
+    for counter in counters: # 使用更清晰的变量名
+        if counter['m'] == test_params['m'] and counter['s'] == test_params['s']: # 简单过滤
+            print(f"  Params: {counter['m']}-{counter['n']}-{counter['k']}-{counter['j']}-{counter['s']}, LastIndex: {counter['last_run_index']}")
 
     # 4. 删除 ID 为 id3 (run_index=3) 的记录
     if id3:
@@ -418,9 +424,9 @@ if __name__ == '__main__':
 
         print("\n删除后计数器状态:")
         counters = get_all_counters(db_file=test_db_file)
-        for c in counters:
-             if c['m'] == test_params['m'] and c['s'] == test_params['s']:
-                print(f"  Params: {c['m']}-{c['n']}-{c['k']}-{c['j']}-{c['s']}, LastIndex: {c['last_run_index']} (预期: {idx3-1})")
+        for counter in counters:
+             if counter['m'] == test_params['m'] and counter['s'] == test_params['s']:
+                print(f"  Params: {counter['m']}-{counter['n']}-{counter['k']}-{counter['j']}-{counter['s']}, LastIndex: {counter['last_run_index']} (预期: {idx3-1})")
     else:
         print("\n跳过删除测试，因为之前的插入失败。")
 
@@ -432,9 +438,9 @@ if __name__ == '__main__':
 
     print("\n最终计数器状态:")
     counters = get_all_counters(db_file=test_db_file)
-    for c in counters:
-         if c['m'] == test_params['m'] and c['s'] == test_params['s']:
-            print(f"  Params: {c['m']}-{c['n']}-{c['k']}-{c['j']}-{c['s']}, LastIndex: {c['last_run_index']} (预期: {idx3})")
+    for counter in counters:
+         if counter['m'] == test_params['m'] and counter['s'] == test_params['s']:
+            print(f"  Params: {counter['m']}-{counter['n']}-{counter['k']}-{counter['j']}-{counter['s']}, LastIndex: {counter['last_run_index']} (预期: {idx3})")
 
     # 6. (可选) 测试删除旧记录 (id2, run_index=2)
     if id2:
@@ -443,10 +449,10 @@ if __name__ == '__main__':
         print(f"删除旧记录结果: {deleted_old}")
         print("\n删除旧记录后计数器状态:")
         counters = get_all_counters(db_file=test_db_file)
-        for c in counters:
-             if c['m'] == test_params['m'] and c['s'] == test_params['s']:
+        for counter in counters:
+             if counter['m'] == test_params['m'] and counter['s'] == test_params['s']:
                  # 此时计数器应该仍然是 3 (来自步骤 5)
-                print(f"  Params: {c['m']}-{c['n']}-{c['k']}-{c['j']}-{c['s']}, LastIndex: {c['last_run_index']} (预期: {idx3}, 不变)")
+                print(f"  Params: {counter['m']}-{counter['n']}-{counter['k']}-{counter['j']}-{counter['s']}, LastIndex: {counter['last_run_index']} (预期: {idx3}, 不变)")
 
     print("\n--- 场景模拟结束 ---")
 
