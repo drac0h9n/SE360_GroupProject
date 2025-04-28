@@ -30,6 +30,7 @@ print(f"使用的随机种子: {random_seed}")
 def main(page: ft.Page):
     """构建并运行 Flet 应用程序的主函数"""
     page.title = "组合覆盖问题求解器 (含数据库管理)"  # 窗口标题
+    page.theme_mode = ft.ThemeMode.LIGHT  # 主题模式
     page.vertical_alignment = ft.MainAxisAlignment.START  # 页面垂直对齐方式
     page.window_width = 900   # 窗口初始宽度
     page.window_height = 850  # 窗口初始高度
