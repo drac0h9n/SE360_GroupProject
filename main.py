@@ -6,6 +6,7 @@
 # 移除了全局 RunCounter，使用 db.py 管理持久化 run_index。
 # **新增了数据库结果管理功能，允许用户查看、显示详情和删除数据库中的记录。**
 # **修改：移除了删除操作的二次确认弹窗。**
+# **修改：添加打印预览功能。**
 
 import flet as ft
 import random
@@ -45,6 +46,7 @@ def main(page: ft.Page):
     # --- UI 控件定义 (计算部分) ---
     # --- ========================== ---
 
+    # ... (计算部分的控件定义保持不变) ...
     # --- 输入控件 ---
     txt_m = ft.TextField(label="M (基础集)", hint_text="例如: 45", width=100, value="45")
     txt_n = ft.TextField(label="N (Universe)", hint_text="例如: 8", width=100, value="8")
@@ -134,6 +136,13 @@ def main(page: ft.Page):
         color=ft.colors.RED, # 按钮文字颜色为红色
         disabled=True # 初始禁用
     )
+    # /// NEW: 添加打印按钮
+    print_selected_button = ft.ElevatedButton(
+        "打印",
+        icon=ft.icons.PRINT,
+        on_click=None, # 稍后绑定
+        disabled=True # 初始禁用
+    )
     # 从数据库视图返回主计算界面的按钮
     back_to_main_button = ft.ElevatedButton("返回计算界面", icon=ft.icons.ARROW_BACK, on_click=None)
 
@@ -145,16 +154,15 @@ def main(page: ft.Page):
         padding=10,                                # 内边距
         margin=ft.margin.only(top=10),             # 上外边距
         expand=True,                               # 允许容器扩展填充垂直空间
-        # height=200 # 可以选择设置固定高度
     )
 
     # --- 数据库结果管理视图的整体容器 (初始隐藏) ---
     db_management_view = ft.Column(
         [
             ft.Text("数据库结果列表", size=16, weight=ft.FontWeight.BOLD), # 标题
-            # 放置数据库操作按钮的行，允许换行
+            # /// MODIFIED: 将打印按钮加入此行
             ft.Row(
-                [refresh_db_button, display_details_button, delete_selected_button, back_to_main_button],
+                [refresh_db_button, display_details_button, delete_selected_button, print_selected_button, back_to_main_button],
                 spacing=10, # 按钮间距
                 wrap=True   # 允许按钮在空间不足时换行
             ),
@@ -177,10 +185,53 @@ def main(page: ft.Page):
         expand=True    # 允许此视图在垂直方向上扩展
     )
 
+    # --- ======================== ---
+    # /// NEW: UI 控件定义 (打印部分) ---
+    # --- ======================== ---
+    print_details_display = ft.Text( # 用于显示打印内容的文本控件
+        "...",
+        selectable=True,
+        size=12,
+        overflow=ft.TextOverflow.VISIBLE # 允许内容溢出
+    )
+
+    print_back_button = ft.ElevatedButton( # 从打印视图返回数据库视图的按钮
+        "返回数据库列表",
+        icon=ft.icons.ARROW_BACK,
+        on_click=None # 稍后绑定
+    )
+
+    print_preview_view = ft.Column( # 打印预览视图的整体容器
+        [
+            ft.Row(
+                [
+                    ft.Text("打印预览 - 记录详情", size=16, weight=ft.FontWeight.BOLD),
+                    print_back_button # 返回按钮放在标题旁边
+                ],
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN # 使标题和按钮分布在两端
+            ),
+            ft.Divider(),
+            ft.Container( # 容器用于显示内容，带滚动条
+                ft.Column(
+                    [print_details_display], # 包含显示内容的 Text
+                    scroll=ft.ScrollMode.ADAPTIVE # 当内容过多时允许滚动
+                ),
+                border=ft.border.all(1, ft.colors.BLACK26),
+                border_radius=ft.border_radius.all(5),
+                padding=10,
+                margin=ft.margin.only(top=10),
+                expand=True # 允许内容区域扩展填充垂直空间
+            )
+        ],
+        visible=False, # 打印预览视图初始隐藏
+        expand=True    # 允许此视图在垂直方向上扩展
+    )
+
     # --- ========================== ---
     # --- 辅助函数和事件处理函数 ---
     # --- ========================== ---
 
+    # ... (log_message, clear_log, show_info_message, set_busy, validate_and_get_int, update_c_related_info, on_manual_univ_change, on_specify_c_change 等函数保持不变) ...
     # --- 日志函数 ---
     def log_message(message: str, is_error: bool = False):
         """向日志区域 (log_output) 添加一条带时间戳的消息"""
@@ -214,12 +265,15 @@ def main(page: ft.Page):
         for ctrl in [txt_m, txt_n, txt_k, txt_j, txt_s, txt_timeout, chk_manual_univ, txt_manual_univ, chk_specify_c, txt_specify_c]: # MODIFIED: y -> c
             ctrl.disabled = busy
 
-        # 注意：数据库管理视图的按钮启用/禁用状态由其自身逻辑管理 (如选择后才启用详情/删除)
+        # 注意：数据库管理视图的按钮启用/禁用状态由其自身逻辑管理 (如选择后才启用详情/删除/打印)
         # 但可以在这里统一处理，如果需要的话 (例如，计算时完全禁用数据库操作)
-        # refresh_db_button.disabled = busy
-        # display_details_button.disabled = busy or (selected_db_result_id.current is None) # 结合原有逻辑
-        # delete_selected_button.disabled = busy or (selected_db_result_id.current is None) # 结合原有逻辑
-        # back_to_main_button.disabled = busy # 计算时不允许返回
+        refresh_db_button.disabled = busy
+        is_selection_made = selected_db_result_id.current is not None
+        display_details_button.disabled = busy or not is_selection_made # 结合原有逻辑
+        delete_selected_button.disabled = busy or not is_selection_made # 结合原有逻辑
+        print_selected_button.disabled = busy or not is_selection_made # /// MODIFIED: 控制打印按钮
+
+        back_to_main_button.disabled = busy # 计算时不允许返回
 
         page.update() # 应用状态更改
 
@@ -383,6 +437,7 @@ def main(page: ft.Page):
         """将从数据库获取的单条结果摘要字典格式化为易于阅读的字符串，用于列表显示。
            **修改版格式**: ID: X | M-N-K-J-S-RunIndex-Y | 时间戳
         """
+        # ... (此函数不变) ...
         try:
             # 尝试解析 ISO 格式的时间戳
             timestamp_dt = datetime.fromisoformat(result_item['timestamp']) if result_item.get('timestamp') else datetime.now()
@@ -394,7 +449,6 @@ def main(page: ft.Page):
         # 格式化时间戳
         time_str = timestamp_dt.strftime('%Y-%m-%d %H:%M') if timestamp_dt else "N/A"
 
-        # --- 修改开始 ---
         # 构建包含 M, N, K, J, S, RunIndex 和 NumResults (Y) 的字符串段
         params_run_num_str = (f"{result_item.get('m','?')}-"
                               f"{result_item.get('n','?')}-"
@@ -411,6 +465,7 @@ def main(page: ft.Page):
 
     def update_db_list_view():
         """根据全局状态 `db_results_list_data.current` 更新数据库结果列表 UI (ListView)"""
+        # ... (基本不变，只是在清除选择时，也重置打印预览详情) ...
         db_results_list_view.controls.clear() # 清空现有列表项
         if not db_results_list_data.current: # 如果数据为空
             db_results_list_view.controls.append(ft.Text("数据库中没有结果记录。"))
@@ -426,12 +481,15 @@ def main(page: ft.Page):
         db_results_radio_group.value = None        # 清除 RadioGroup 的选中值
         selected_db_result_id.current = None       # 清除全局存储的选中 ID
         db_result_details_view.value = "请先在上方选择一条记录，然后点击“显示详情”。" # 重置详情区提示
+        print_details_display.value = ""           # /// NEW: 清空打印预览区
         display_details_button.disabled = True     # 禁用“显示详情”按钮
         delete_selected_button.disabled = True     # 禁用“删除所选”按钮
+        print_selected_button.disabled = True     # /// NEW: 禁用“打印”按钮
         page.update() # 更新 UI
 
     def load_db_results(e=None):
         """从数据库加载结果摘要列表，并更新 UI"""
+        # ... (此函数不变) ...
         log_message("正在从数据库加载结果列表...")
         try:
             results = db.get_results_summary() # 调用 db 模块的函数获取摘要列表
@@ -450,6 +508,7 @@ def main(page: ft.Page):
 
     def on_db_result_select(e):
         """当用户在数据库结果列表中选择一个 Radio 按钮时触发的回调函数"""
+        # /// MODIFIED: 添加对打印按钮的控制
         selected_id_str = db_results_radio_group.value # 获取 RadioGroup 当前选中的 value (即记录ID字符串)
         if selected_id_str: # 如果有选中项
             try:
@@ -457,18 +516,22 @@ def main(page: ft.Page):
                 selected_db_result_id.current = selected_id_int # 更新全局状态变量
                 display_details_button.disabled = False # 启用“显示详情”按钮
                 delete_selected_button.disabled = False # 启用“删除所选”按钮
+                print_selected_button.disabled = False # /// NEW: 启用“打印”按钮
                 log_message(f"已选择数据库记录 ID: {selected_id_int}")
             except (ValueError, TypeError): # 捕捉转换整数失败或其他类型错误
                 selected_db_result_id.current = None
                 display_details_button.disabled = True
                 delete_selected_button.disabled = True
+                print_selected_button.disabled = True # /// NEW: 禁用“打印”按钮
                 log_message(f"无效的选择值: '{selected_id_str}'。", is_error=True)
         else: # 如果没有选中项 (例如，列表为空或清除了选择)
             selected_db_result_id.current = None
             display_details_button.disabled = True
             delete_selected_button.disabled = True
+            print_selected_button.disabled = True # /// NEW: 禁用“打印”按钮
         # 提示用户下一步操作
         db_result_details_view.value = "请点击“显示详情”查看所选记录。"
+        print_details_display.value = "" # /// NEW: 清空打印预览区
         page.update() # 更新按钮状态和详情区文本
 
     # --- 绑定数据库列表的选择事件 ---
@@ -476,6 +539,7 @@ def main(page: ft.Page):
 
     def display_selected_details(e):
         """当用户点击“显示详情”按钮时触发，获取并显示选中记录的详细信息"""
+        # ... (此函数不变) ...
         if selected_db_result_id.current is None: # 检查是否已选中记录
             log_message("未选择任何记录以显示详情。", is_error=True)
             return
@@ -541,18 +605,9 @@ def main(page: ft.Page):
         finally:
              page.update() # 确保页面最终更新
 
-    # --- 删除确认对话框 ---
-    # **修改点**: 移除了 delete_confirm_dialog 的定义
-    # delete_confirm_dialog = ft.AlertDialog(...) # <--- 此块代码已删除
-
-    # **修改点**: 移除了 close_dialog 函数
-    # def close_dialog(dialog: ft.AlertDialog): ... # <--- 此函数已删除
-
     def execute_delete(e):
         """执行实际的删除操作 (由“删除所选”按钮直接调用)"""
-        # **修改点**: 移除了关闭对话框的调用
-        # close_dialog(delete_confirm_dialog) # 首先关闭对话框 (不再需要)
-
+        # ... (此函数不变) ...
         if selected_db_result_id.current is None: # 再次检查是否有选中项
             log_message("未选择任何记录进行删除。", is_error=True)
             return
@@ -576,18 +631,109 @@ def main(page: ft.Page):
         finally:
              page.update() # 确保 UI 更新
 
-    # --- 将 execute_delete 绑定到确认对话框的“确定删除”按钮 ---
-    # **修改点**: 移除了这一行，因为对话框不存在了
-    # delete_confirm_dialog.actions[0].on_click = execute_delete
+    # /// NEW: 格式化详情用于打印 (带序号)
+    def format_details_for_printing(details: dict) -> str:
+        """将记录详情格式化为适合打印的字符串，集合带序号。"""
+        if not details:
+            return "错误：无法获取记录详情。"
 
-    # **修改点**: 移除了 confirm_delete 函数
-    # def confirm_delete(e): ... # <--- 此函数已删除
+        try:
+            params_str = f"{details.get('m', '?')}-{details.get('n', '?')}-{details.get('k', '?')}-{details.get('j', '?')}-{details.get('s', '?')}-{details.get('run_index', '?')}"
+            universe_disp = details.get('universe_parsed', 'N/A')
+            sets_list = details.get('sets_found_parsed', [])
+            num_sets = len(sets_list) if isinstance(sets_list, list) else 0
+            timestamp_str = details.get('timestamp', 'N/A')
+            # 尝试更友好的时间格式
+            try:
+                 timestamp_dt = datetime.fromisoformat(timestamp_str)
+                 timestamp_str = timestamp_dt.strftime('%Y-%m-%d %H:%M:%S')
+            except (ValueError, TypeError):
+                 pass # 保留原始字符串
+
+            # 构建基础信息
+            print_text = (
+                f"记录 ID: {details.get('id')}\n"
+                f"参数 (M-N-K-J-S-RunIdx): {params_str}\n"
+                f"保存时间: {timestamp_str}\n"
+                f"算法: {details.get('algorithm', 'N/A')}\n"
+                f"计算耗时: {details.get('time_taken', 0):.2f} 秒\n"
+                f"覆盖条件 (c): {details.get('c_condition', 'N/A')}\n"
+                f"使用的 Universe ({len(universe_disp) if isinstance(universe_disp, list) else 'N/A'} 个):\n  {universe_disp}\n"
+                "========================================\n"
+                f"找到的集合 ({num_sets} 组):\n"
+                "========================================\n"
+            )
+
+            # --- 添加带序号的集合列表 ---
+            if num_sets > 0 and isinstance(sets_list, list):
+                set_lines = []
+                for idx, s_item in enumerate(sets_list, start=1):
+                    # 对每个集合排序后转为字符串
+                    set_str = str(sorted(s_item))
+                    set_lines.append(f"{idx}. {set_str}") # 添加序号
+                print_text += "\n".join(set_lines) # 将所有带序号的行合并
+            elif isinstance(sets_list, str): # 如果 JSON 解析失败
+                print_text += f"  (无法解析集合: {sets_list})"
+            else: # 如果没有集合
+                print_text += "  (无)"
+
+            return print_text
+
+        except Exception as e:
+            log_message(f"格式化打印文本时出错: {e}", is_error=True)
+            return f"错误：格式化记录 {details.get('id','N/A')} 的详情时出错。\n{e}"
+
+    # /// NEW: 显示打印预览界面的函数
+    def show_print_preview(e=None):
+        """获取选中记录详情，格式化后显示在打印预览视图中。"""
+        if selected_db_result_id.current is None:
+            log_message("未选择任何记录进行打印。", is_error=True)
+            # 可以在打印预览视图显示错误，但这通常不应该发生（按钮被禁用）
+            print_details_display.value = "错误：未选择记录。"
+            print_details_display.color = ft.colors.RED
+            page.update()
+            return
+
+        target_id = selected_db_result_id.current
+        log_message(f"准备 ID={target_id} 的打印预览...")
+        print_details_display.value = f"正在加载 ID={target_id} 的数据进行打印预览..."
+        print_details_display.color = ft.colors.BLACK # 重置颜色
+        # 强制更新以显示加载信息
+        main_computation_view.visible = False
+        db_management_view.visible = False
+        print_preview_view.visible = True
+        page.update()
+
+        try:
+            # 获取完整详情
+            details = db.get_result_details(target_id)
+            if details:
+                # 格式化详情用于打印
+                formatted_print_text = format_details_for_printing(details)
+                print_details_display.value = formatted_print_text
+                log_message(f"已生成 ID={target_id} 的打印预览内容。")
+            else:
+                msg = f"错误：无法获取 ID={target_id} 的详细信息进行打印。"
+                log_message(msg, is_error=True)
+                print_details_display.value = msg
+                print_details_display.color = ft.colors.RED
+        except Exception as ex:
+            msg = f"生成打印预览时出错 (ID={target_id}): {ex}"
+            log_message(msg, is_error=True)
+            print_details_display.value = f"错误: {msg}"
+            print_details_display.color = ft.colors.RED
+
+        # 确保最终界面是更新的打印预览视图
+        main_computation_view.visible = False
+        db_management_view.visible = False
+        print_preview_view.visible = True
+        page.update()
 
     # --- 绑定数据库管理按钮的事件 ---
     refresh_db_button.on_click = load_db_results       # 刷新按钮 -> 加载数据
     display_details_button.on_click = display_selected_details # 显示详情按钮 -> 显示详情
-    # **修改点**: “删除所选”按钮直接绑定到 execute_delete
     delete_selected_button.on_click = execute_delete     # 删除按钮 -> 直接执行删除
+    print_selected_button.on_click = show_print_preview # /// NEW: 打印按钮 -> 显示打印预览
 
     # --- ================= ---
     # --- 视图切换逻辑 ---
@@ -649,27 +795,39 @@ def main(page: ft.Page):
         expand=True   # 允许此视图在垂直方向上扩展
     )
 
-    def switch_view(show_db_view: bool):
-        """切换主计算视图和数据库管理视图的可见性"""
-        main_computation_view.visible = not show_db_view # 如果要显示数据库视图，则隐藏主视图
-        db_management_view.visible = show_db_view      # 设置数据库视图的可见性
-        if show_db_view: # 如果切换到数据库视图
-            load_db_results() # 自动加载/刷新数据库列表
+    # /// MODIFIED: 更新视图切换逻辑以包含打印视图
+    def switch_view(view_name: str):
+        """切换可见视图: 'main', 'db', 'print'"""
+        main_computation_view.visible = (view_name == 'main')
+        db_management_view.visible = (view_name == 'db')
+        print_preview_view.visible = (view_name == 'print')
+
+        if view_name == 'db':
+            # 切换到数据库视图时，如果之前不在打印预览，则刷新列表
+            # (如果刚从打印预览返回，则列表内容不变，无需刷新)
+            if not print_preview_view.visible: # 简单判断，可能需要更精确的状态
+                load_db_results()
             log_message("已切换到数据库结果管理视图。")
-        else: # 如果切换回主计算视图
+        elif view_name == 'main':
             log_message("已返回到主计算界面。")
-        page.update() # 更新页面以应用可见性更改
+        elif view_name == 'print':
+            # show_print_preview 函数负责加载内容和记录日志
+             pass # 日志记录在 show_print_preview 中完成
+
+        page.update()
 
     # --- 绑定视图切换按钮的事件 ---
-    # 点击“查看/管理数据库结果”按钮时，调用 switch_view(True)
-    show_db_view_button.on_click = lambda e: switch_view(True)
-    # 点击数据库视图中的“返回计算界面”按钮时，调用 switch_view(False)
-    back_to_main_button.on_click = lambda e: switch_view(False)
+    # 点击“查看/管理数据库结果”按钮
+    show_db_view_button.on_click = lambda e: switch_view('db')
+    # 点击数据库视图中的“返回计算界面”按钮
+    back_to_main_button.on_click = lambda e: switch_view('main')
+    # /// NEW: 点击打印预览中的“返回数据库列表”按钮
+    print_back_button.on_click = lambda e: switch_view('db')
 
     # --- ========================== ---
     # --- 提交计算的核心逻辑函数 ---
     # --- ========================== ---
-
+    # ... (on_submit 和 run_computation 函数保持不变) ...
     def on_submit(e):
         """处理提交按钮点击事件：验证输入，获取 run_index, 启动后台计算线程。"""
         log_message("收到计算请求...")
@@ -1006,12 +1164,14 @@ def main(page: ft.Page):
     # --- ============ ---
     # --- 页面最终布局 ---
     # --- ============ ---
+    # /// MODIFIED: Add print_preview_view to the layout
     page.add(
         ft.Container( # 使用一个顶层容器包裹所有内容
             content=ft.Column(
                 [
                     main_computation_view, # 主计算视图 (初始可见)
-                    db_management_view     # 数据库管理视图 (初始隐藏)
+                    db_management_view,    # 数据库管理视图 (初始隐藏)
+                    print_preview_view     # /// NEW: 打印预览视图 (初始隐藏)
                 ],
                 expand=True # 让内部的 Column 能够扩展
             ),
@@ -1067,13 +1227,16 @@ if __name__ == "__main__":
 
             print(f"信息: 使用命令行指定的数据库路径: {os.path.abspath(db.DB_FILE)}")
             # 尝试创建数据库所在的目录 (如果不存在)
-            if not os.path.exists(db_dir):
+            if db_dir and not os.path.exists(db_dir): # Check if db_dir is not empty
                 try:
                     os.makedirs(db_dir, exist_ok=True) # exist_ok=True 避免目录已存在时报错
                     print(f"信息: 已创建数据库目录: {db_dir}")
                 except OSError as e:
                     print(f"错误: 无法创建数据库目录 '{db_dir}': {e}. 将使用默认路径 '{db.DB_FILE}'.")
                     db.DB_FILE = "k6_results.db" # 恢复默认值
+            elif not db_dir: # Handle case where db_dir is empty (e.g., just a filename was given)
+                print("信息: 数据库将在当前工作目录创建/使用。")
+
         else:
              print(f"警告: 无效的数据库路径参数 '{custom_db_path}'. 将使用默认路径 '{db.DB_FILE}'.")
 
