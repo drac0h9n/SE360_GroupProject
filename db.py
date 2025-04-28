@@ -232,39 +232,168 @@ def get_all_counters(db_file=DB_FILE):
         if conn:
             conn.close()
 
+def get_results_summary(db_file=DB_FILE):
+    """
+    从数据库获取所有结果的摘要信息，用于列表显示。
+
+    Args:
+        db_file (str): 数据库文件的路径。
+
+    Returns:
+        list: 包含结果摘要字典的列表。每个字典包含 'id', 'm', 'n', 'k', 'j', 's', 'run_index', 'num_results', 'timestamp'。
+              如果出错则返回空列表。
+    """
+    conn = None
+    results = []
+    try:
+        conn = sqlite3.connect(db_file)
+        conn.row_factory = sqlite3.Row # 按列名访问
+        cursor = conn.cursor()
+        # 选择需要的列，并按时间戳降序排序
+        cursor.execute("""
+            SELECT id, m, n, k, j, s, run_index, num_results, timestamp
+            FROM results
+            ORDER BY timestamp DESC
+        """)
+        rows = cursor.fetchall()
+        results = [dict(row) for row in rows]
+        print(f"数据库查询：找到 {len(results)} 条结果摘要。")
+    except sqlite3.Error as e:
+        print(f"数据库查询错误 (查询 results 摘要): {e}")
+        results = [] # 出错时返回空列表
+    finally:
+        if conn:
+            conn.close()
+    return results
+
+def get_result_details(result_id, db_file=DB_FILE):
+    """
+    根据结果的 ID 从数据库获取详细信息。
+
+    Args:
+        result_id (int): 要获取详情的结果的数据库 ID。
+        db_file (str): 数据库文件路径。
+
+    Returns:
+        dict: 包含所选结果所有字段的字典。'sets_found' 和 'universe' 需要被 JSON 解析。
+              如果找不到记录或发生错误，返回 None。
+    """
+    conn = None
+    details = None
+    try:
+        conn = sqlite3.connect(db_file)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM results WHERE id = ?", (result_id,))
+        row = cursor.fetchone()
+        if row:
+            details = dict(row)
+            # 尝试解析 JSON 字段
+            try:
+                if details.get('sets_found'):
+                    details['sets_found_parsed'] = json.loads(details['sets_found'])
+                else:
+                     details['sets_found_parsed'] = []
+                if details.get('universe'):
+                    details['universe_parsed'] = json.loads(details['universe'])
+                else:
+                    details['universe_parsed'] = []
+                print(f"数据库查询：获取 ID={result_id} 的详细信息成功。")
+            except json.JSONDecodeError as json_err:
+                print(f"数据库警告：解析 ID={result_id} 的 JSON 字段失败: {json_err}")
+                # 保留原始字符串，并标记解析失败
+                details['sets_found_parsed'] = f"JSON 解析错误: {details.get('sets_found')}"
+                details['universe_parsed'] = f"JSON 解析错误: {details.get('universe')}"
+            except Exception as parse_err:
+                 print(f"数据库错误：解析 ID={result_id} 的字段时出错: {parse_err}")
+                 details['sets_found_parsed'] = f"解析时出错: {details.get('sets_found')}"
+                 details['universe_parsed'] = f"解析时出错: {details.get('universe')}"
+        else:
+            print(f"数据库查询：未找到 ID={result_id} 的记录。")
+
+    except sqlite3.Error as e:
+        print(f"数据库查询错误 (获取详情 ID={result_id}): {e}")
+    finally:
+        if conn:
+            conn.close()
+    return details
+
+def delete_result(result_id, db_file=DB_FILE):
+    """
+    根据结果的 ID 从数据库删除记录。
+
+    Args:
+        result_id (int): 要删除的结果的数据库 ID。
+        db_file (str): 数据库文件路径。
+
+    Returns:
+        bool: True 如果删除成功, False 如果发生错误或未找到记录。
+    """
+    conn = None
+    success = False
+    try:
+        conn = sqlite3.connect(db_file, timeout=10)
+        cursor = conn.cursor()
+        # 执行删除操作
+        cursor.execute("DELETE FROM results WHERE id = ?", (result_id,))
+        # 检查是否有行被删除
+        if cursor.rowcount > 0:
+            conn.commit()
+            print(f"数据库操作：成功删除 ID={result_id} 的记录。")
+            success = True
+        else:
+            print(f"数据库操作：未找到要删除的记录 ID={result_id}。")
+            # 未找到也算“成功”完成操作，但没有实际删除
+            success = True # 或者可以返回 False 表示未删除任何东西
+    except sqlite3.Error as e:
+        print(f"数据库删除错误 (删除 ID={result_id}): {e}")
+        if conn:
+            try:
+                conn.rollback()
+                print("数据库：删除操作已回滚。")
+            except sqlite3.Error as rb_err:
+                print(f"数据库错误：回滚删除失败: {rb_err}")
+        success = False
+    finally:
+        if conn:
+            conn.close()
+    return success
+
+# --- (确保 if __name__ == '__main__' 部分不会干扰导入) ---
 if __name__ == '__main__':
-    # 作为脚本运行时，执行数据库设置（用于初始化或测试）
     print("正在直接运行 db.py 来设置/检查数据库...")
     setup_database()
 
-    print("\n测试获取并增加运行索引 (例: m=10, n=5, k=3, j=2, s=1):")
-    m, n, k, j, s = 10, 5, 3, 2, 1
-    idx1 = get_and_increment_run_index(m, n, k, j, s)
-    print(f"第一次获取索引: {idx1}")
-    idx2 = get_and_increment_run_index(m, n, k, j, s)
-    print(f"第二次获取索引: {idx2}")
-    idx3 = get_and_increment_run_index(m, n, k, j, s)
-    print(f"第三次获取索引: {idx3}")
-    print("---")
-    m, n, k, j, s = 12, 6, 4, 3, 2 # 不同参数
-    idx_other = get_and_increment_run_index(m, n, k, j, s)
-    print(f"获取另一组参数的索引: {idx_other}")
+    print("\n--- 数据库操作测试 ---")
+    # 添加一些模拟数据用于测试 (如果需要)
+    # ...
 
-    print("\n测试查询 run_counters 表:")
-    counters = get_all_counters()
-    if counters:
-        for counter in counters:
-            print(counter)
+    print("\n测试 get_results_summary:")
+    summary = get_results_summary()
+    if summary:
+        print(f"找到 {len(summary)} 条摘要:")
+        for item in summary[:3]: # 打印前3条
+            print(f"  ID: {item['id']}, Params: {item['m']}-{item['n']}-{item['k']}-{item['j']}-{item['s']}-{item['run_index']}, Sets: {item['num_results']}, Time: {item['timestamp']}")
     else:
-        print("run_counters 表中尚无记录。")
+        print("摘要列表为空。")
 
-    print("\n测试查询 results 表:")
-    results = get_all_results()
-    if results:
-        print(f"共找到 {len(results)} 条结果记录。打印最新的 5 条:")
-        for res in results[:5]: # 打印最多5条记录
-            # 为了简洁，只打印部分字段
-            print(f"  ID:{res['id']}, Params:({res['m']},{res['n']},{res['k']},{res['j']},{res['s']}), Run:{res['run_index']}, NumSets:{res['num_results']}, Alg:{res['algorithm']}, Time:{res['time_taken']:.2f}s, Timestamp:{res['timestamp']}")
-            # print(res) # 打印完整记录
+    # 假设数据库中存在 ID=1 的记录
+    test_id = 1
+    if summary: test_id = summary[0]['id'] # 获取最新记录的ID测试
+    print(f"\n测试 get_result_details (ID={test_id}):")
+    details = get_result_details(test_id)
+    if details:
+        print(f"  获取到详情: M={details.get('m')}, N={details.get('n')}, K={details.get('k')}, Run={details.get('run_index')}")
+        print(f"  Universe (parsed): {details.get('universe_parsed')}")
+        print(f"  Sets Found ({len(details.get('sets_found_parsed',[]))}) (parsed, 前5个): {details.get('sets_found_parsed', [])[:5]}")
+        # print(f"  原始 Sets Found: {details.get('sets_found')[:100]}...") # 打印原始 JSON (截断)
     else:
-        print("results 表中尚无记录。")
+        print(f"  未能获取 ID={test_id} 的详情。")
+
+    # print(f"\n测试 delete_result (ID={test_id}):")
+    # # 警告：取消注释下一行将删除数据！
+    # # deleted = delete_result(test_id)
+    # # print(f"删除操作结果: {deleted}")
+    # print("(删除测试已注释掉，防止意外删除数据)")
+
+    print("\n数据库模块测试结束。")
