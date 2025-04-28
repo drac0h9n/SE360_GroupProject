@@ -380,8 +380,9 @@ def main(page: ft.Page):
     # --- ================================ ---
 
     def format_result_summary(result_item: dict) -> str:
-        """将从数据库获取的单条结果摘要字典格式化为易于阅读的字符串，用于列表显示。"""
-        # 示例输出: "ID: 123 | 45-8-6-4-4-1 | 50 组 | 2023-10-27 10:30:00"
+        """将从数据库获取的单条结果摘要字典格式化为易于阅读的字符串，用于列表显示。
+           **修改版格式**: ID: X | M-N-K-J-S-RunIndex-Y | 时间戳
+        """
         try:
             # 尝试解析 ISO 格式的时间戳
             timestamp_dt = datetime.fromisoformat(result_item['timestamp']) if result_item.get('timestamp') else datetime.now()
@@ -393,10 +394,20 @@ def main(page: ft.Page):
         # 格式化时间戳
         time_str = timestamp_dt.strftime('%Y-%m-%d %H:%M') if timestamp_dt else "N/A"
 
-        # 构建摘要字符串
+        # --- 修改开始 ---
+        # 构建包含 M, N, K, J, S, RunIndex 和 NumResults (Y) 的字符串段
+        params_run_num_str = (f"{result_item.get('m','?')}-"
+                              f"{result_item.get('n','?')}-"
+                              f"{result_item.get('k','?')}-"
+                              f"{result_item.get('j','?')}-"
+                              f"{result_item.get('s','?')}-"
+                              f"{result_item.get('run_index','?')}-"  # 连接 RunIndex
+                              f"{result_item.get('num_results','?')}") # 直接连接 NumResults (Y)
+
+        # 构建最终的摘要字符串，使用修改后的格式
         return (f"ID: {result_item.get('id', 'N/A')} | "
-                f"{result_item.get('m','?')}-{result_item.get('n','?')}-{result_item.get('k','?')}-{result_item.get('j','?')}-{result_item.get('s','?')}-{result_item.get('run_index','?')} | "
-                f"{result_item.get('num_results','?')} 组 | {time_str}")
+                f"{params_run_num_str} | " # 使用新的组合字符串段
+                f"{time_str}")
 
     def update_db_list_view():
         """根据全局状态 `db_results_list_data.current` 更新数据库结果列表 UI (ListView)"""
