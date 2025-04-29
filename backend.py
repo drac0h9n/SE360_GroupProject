@@ -99,15 +99,15 @@ def greedy_cover(args):
                 if len(j_subset.intersection(k_subset)) >= s:
                     k_subset_covers_j_indices[idx_k].append(idx_j)
                     j_subset_covered_by_k_indices[idx_j].append(idx_k)
-        print(f"[Greedy-{run_idx}] 预计算覆盖关系完成。")
+        print(f"[Greedy-{run_idx}] Precomputation of covering relationships completed.")
 
         # Check if there exists a j-subset that cannot be covered c times at all.
         for idx_j in range(num_j_subsets):
              potential_covers = len(j_subset_covered_by_k_indices[idx_j])
              if potential_covers < c: 
-                 print(f"[Greedy-{run_idx}] 错误：j-子集 {idx_j} ({target_j_subsets[idx_j]}) 最多只能被 {potential_covers} 个 k-子集覆盖，无法满足 c={c} 的要求。问题不可行。")
+                 print(f"[Greedy-{run_idx}] Error: j-subset {idx_j} ({target_j_subsets[idx_j]}) can be covered by at most {potential_covers} k-subsets, which does not meet the requirement of c={c}. Problem is infeasible.")
                  result['status'] = 'INFEASIBLE_C_TARGET' 
-                 result['error_message'] = f"j-子集 {idx_j} 无法被覆盖 {c} 次。" 
+                 result['error_message'] = f"j-subset {idx_j} cannot be covered {c} times." 
                  result['time'] = time.time() - start_time
                  q.put(result)
                  return
@@ -135,7 +135,6 @@ def greedy_cover(args):
                 if current_coverage_increase_count > max_coverage_increase_count:
                     max_coverage_increase_count = current_coverage_increase_count
                     best_k_subset_idx = idx_k
-
             if best_k_subset_idx == -1:
                 # 检查是否真的没有任何 K-子集可以覆盖任何剩余的 J-子集
                 can_cover_anything = False
@@ -154,13 +153,11 @@ def greedy_cover(args):
                     print(f"[Greedy-{run_idx}] 警告：在迭代 {iteration} 中找不到最佳 k-子集 (best_k_subset_idx = -1)。可能存在问题。")
                     result['status'] = 'FAILED_INCOMPLETE_COVER' # 或其他错误状态
                 break # 退出循环
-
             # Pick the best k-subset found in this iteration. 
             selected_k_subset_indices.append(best_k_subset_idx)
             chosen_k_subset = all_k_subsets[best_k_subset_idx]
-            print(f"[Greedy-{run_idx}] 迭代 {iteration}: 选择块 {best_k_subset_idx} {list(sorted(chosen_k_subset))}, "
-                  f"为 {max_coverage_increase_count} 个未满足的 j-子集增加了覆盖。")
-
+            print(f"[Greedy-{run_idx}] Iteration {iteration}: Selected block {best_k_subset_idx} {list(sorted(chosen_k_subset))}, "
+                  f"increased coverage for {max_coverage_increase_count} unsatisfied j-subsets.")
             # Update the coverage count of the affected j-subsets
             newly_satisfied_count = 0
             j_indices_affected_this_round = k_subset_covers_j_indices[best_k_subset_idx]
@@ -172,15 +169,14 @@ def greedy_cover(args):
                     if j_subset_coverage_count[idx_j] >= c: 
                         needs_more_coverage_j_indices.remove(idx_j) # Remove from the set to be covered
                         newly_satisfied_count += 1
-            print(f"[Greedy-{run_idx}]   -> 本轮选择后 {newly_satisfied_count} 个 j-子集达到 c={c} 覆盖目标。") 
-            print(f"[Greedy-{run_idx}]   -> 剩余 {len(needs_more_coverage_j_indices)} 个 j-子集待满足。")
+            print(f"[Greedy-{run_idx}]   -> After this round of selection, {newly_satisfied_count} j-subsets have reached the c={c} coverage target.") 
+            print(f"[Greedy-{run_idx}]   -> {len(needs_more_coverage_j_indices)} j-subsets remain to be satisfied.")
             # Add an iteration limit to prevent infinite loops
-            max_iterations = len(all_k_subsets) * c # 粗略上限
+            max_iterations = len(all_k_subsets) * c 
             if iteration > max_iterations and max_iterations > 0:
                   print(f"[Greedy-{run_idx}] 警告：迭代次数过多 ({iteration} > {max_iterations})，可能陷入循环或收敛缓慢。提前终止。")
                   result['status'] = 'FAILED_ITERATION_LIMIT'
                   break
-
         # 5. Results 
         chosen_sets_list = [list(sorted(list(all_k_subsets[idx]))) for idx in selected_k_subset_indices]
         result['sets'] = chosen_sets_list
@@ -188,7 +184,7 @@ def greedy_cover(args):
 
         if not needs_more_coverage_j_indices: # If all j-subsets are satisfied by c times 
             result['status'] = 'SUCCESS'
-            print(f"[Greedy-{run_idx}] 贪心算法成功完成 c={c} 覆盖，共选择 {len(chosen_sets_list)} 个集合。") 
+            print(f"[Greedy-{run_idx}] Greedy algorithm successfully completed c={c} coverage, selecting a total of {len(chosen_sets_list)} sets.")
         else:
             # 如果循环退出但仍有未满足的
             if result['status'] == 'INIT': # 如果状态未被错误或迭代限制覆盖
@@ -278,7 +274,7 @@ def cpsat_cover(args):
         x = [model.NewBoolVar(f'x_{i}') for i in range(num_k_subsets)]
 
         # 5. Define constraints: Each j-subset must be covered by at least c satisfying k-subsets
-        print(f"[ILP-{run_idx}] 开始添加约束 (每个 j-子集 >= {c} 次覆盖)...") 
+        print(f"[ILP-{run_idx}] Starting to add constraints (each j-subset >= {c} times coverage)...")
         constraints_added = 0
         feasible = True # Mark whether the model is potentially feasible
         j_subset_potential_covers = defaultdict(list) # Precompute which k-blocks can cover each j-block
@@ -304,7 +300,7 @@ def cpsat_cover(args):
                 constraints_added += 1
             else: # If a j-subset has no k-subset that can cover it (and c>=1), then it is infeasible
                 if c >= 1: 
-                    print(f"[ILP-{run_idx}] 错误：j-子集 {idx_j} ({set(j_subset)}) 没有任何 k-子集能满足交集 >= {s}。问题不可行。")
+                    print(f"[ILP-{run_idx}] Error: j-subset {idx_j} ({set(j_subset)}) has no k-subset that satisfies intersection >= {s}. Problem is infeasible.")
                     result['status'] = 'INFEASIBLE'
                     feasible = False
                     break
@@ -314,7 +310,7 @@ def cpsat_cover(args):
              q.put(result)
              return
 
-        print(f"[ILP-{run_idx}] 为 {constraints_added}/{num_j_subsets} 个 j-子集添加了覆盖约束。")
+        print(f"[ILP-{run_idx}] Added coverage constraints for {constraints_added}/{num_j_subsets} j-subsets.")
 
         # 6. Define the objective function: Minimize the number of selected k-subsets
         model.Minimize(sum(x))
@@ -327,13 +323,13 @@ def cpsat_cover(args):
         num_workers = mp.cpu_count()
         if num_workers > 1:
             solver.parameters.num_search_workers = num_workers
-            print(f"[ILP-{run_idx}] 使用 {solver.parameters.num_search_workers} 个 worker 进行求解...")
+            print(f"[ILP-{run_idx}] Solving with {solver.parameters.num_search_workers} workers...")
         else:
-            print(f"[ILP-{run_idx}] 使用默认数量的 worker 进行求解...")
+            print(f"[ILP-{run_idx}] Solving with default number of workers...")
 
         # 8. Solve the model
         status = solver.Solve(model)
-        result['time'] = time.time() - start_time # 记录总时间
+        result['time'] = time.time() - start_time # Total time taken for solving 
 
         # 9. Results 
         status_map = {
