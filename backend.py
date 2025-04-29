@@ -122,18 +122,16 @@ def greedy_cover(args):
         print(f"[Greedy-{run_idx}] 开始贪心选择，目标 c={c}...") 
 
         iteration = 0
-        # 循环直到所有 j-子集的覆盖次数都达到 c
+        # Loop until the coverage count of all j-subsets reaches c.
         while needs_more_coverage_j_indices:
             iteration += 1
             best_k_subset_idx = -1
-            max_coverage_increase_count = -1 # 选择此 k-块能为 *未满足* 的 j-子集增加多少次覆盖？(主要启发式)
-
+            max_coverage_increase_count = -1 # How many additional covers would selecting this k-block provide for *unsatisfied* j-subsets?
             for idx_k in range(len(all_k_subsets)):
-                # 计算当前 k-子集能为哪些 *仍需覆盖* 的 j-子集提供覆盖
+                # Calculate which *still-to-be-covered* j-subsets the current k-subset can provide coverage for.
                 relevant_j_indices = set(k_subset_covers_j_indices[idx_k]).intersection(needs_more_coverage_j_indices)
                 current_coverage_increase_count = len(relevant_j_indices)
-
-                # 贪心策略：选择能为当前未满足的 j-子集提供最多覆盖次数的 k-子集
+                # Greedy strategy: Select the k-subset that provides the most coverage for the currently unsatisfied j-subsets.
                 if current_coverage_increase_count > max_coverage_increase_count:
                     max_coverage_increase_count = current_coverage_increase_count
                     best_k_subset_idx = idx_k
@@ -157,41 +155,38 @@ def greedy_cover(args):
                     result['status'] = 'FAILED_INCOMPLETE_COVER' # 或其他错误状态
                 break # 退出循环
 
-            # 选择最佳的 k-子集
+            # Pick the best k-subset found in this iteration. 
             selected_k_subset_indices.append(best_k_subset_idx)
             chosen_k_subset = all_k_subsets[best_k_subset_idx]
             print(f"[Greedy-{run_idx}] 迭代 {iteration}: 选择块 {best_k_subset_idx} {list(sorted(chosen_k_subset))}, "
                   f"为 {max_coverage_increase_count} 个未满足的 j-子集增加了覆盖。")
 
-            # 更新受影响的 j-子集的覆盖计数
+            # Update the coverage count of the affected j-subsets
             newly_satisfied_count = 0
             j_indices_affected_this_round = k_subset_covers_j_indices[best_k_subset_idx]
             for idx_j in j_indices_affected_this_round:
-                # 只更新那些还需要覆盖的
+                # Only update those that still need to be overwritten.
                 if idx_j in needs_more_coverage_j_indices:
                     j_subset_coverage_count[idx_j] += 1
-                    # 检查是否刚刚满足 c 次覆盖
+                    # Check if c covers have just been satisfied.
                     if j_subset_coverage_count[idx_j] >= c: 
-                        needs_more_coverage_j_indices.remove(idx_j) # 从待覆盖集合中移除
+                        needs_more_coverage_j_indices.remove(idx_j) # Remove from the set to be covered
                         newly_satisfied_count += 1
-
             print(f"[Greedy-{run_idx}]   -> 本轮选择后 {newly_satisfied_count} 个 j-子集达到 c={c} 覆盖目标。") 
             print(f"[Greedy-{run_idx}]   -> 剩余 {len(needs_more_coverage_j_indices)} 个 j-子集待满足。")
-
-            # 添加一个迭代次数上限防止死循环
-            
+            # Add an iteration limit to prevent infinite loops
             max_iterations = len(all_k_subsets) * c # 粗略上限
             if iteration > max_iterations and max_iterations > 0:
                   print(f"[Greedy-{run_idx}] 警告：迭代次数过多 ({iteration} > {max_iterations})，可能陷入循环或收敛缓慢。提前终止。")
                   result['status'] = 'FAILED_ITERATION_LIMIT'
                   break
 
-        # 5. 形成结果
+        # 5. Results 
         chosen_sets_list = [list(sorted(list(all_k_subsets[idx]))) for idx in selected_k_subset_indices]
         result['sets'] = chosen_sets_list
-        result['j_subsets_covered'] = num_j_subsets - len(needs_more_coverage_j_indices) # 最终满足条件的 j-子集数量
+        result['j_subsets_covered'] = num_j_subsets - len(needs_more_coverage_j_indices) # The number of satisfied j-subsets
 
-        if not needs_more_coverage_j_indices: # 如果所有 j-子集都满足了 c 次覆盖
+        if not needs_more_coverage_j_indices: # If all j-subsets are satisfied by c times 
             result['status'] = 'SUCCESS'
             print(f"[Greedy-{run_idx}] 贪心算法成功完成 c={c} 覆盖，共选择 {len(chosen_sets_list)} 个集合。") 
         else:
@@ -276,59 +271,59 @@ def cpsat_cover(args):
             q.put(result)
             return
 
-        # 3. 创建 CP-SAT 模型
+        # 3. Create the CP-SAT model
         model = cp_model.CpModel()
 
-        # 4. 定义变量: 每个 k-子集是否被选中 (0 或 1)
+        # 4. Define variables: Whether each k-subset is selected (0 or 1)
         x = [model.NewBoolVar(f'x_{i}') for i in range(num_k_subsets)]
 
-        # 5. 定义约束: 每个 j-子集必须被至少 c 个满足条件的 k-子集覆盖
+        # 5. Define constraints: Each j-subset must be covered by at least c satisfying k-subsets
         print(f"[ILP-{run_idx}] 开始添加约束 (每个 j-子集 >= {c} 次覆盖)...") 
         constraints_added = 0
-        feasible = True # 标记模型是否可能可行
-        j_subset_potential_covers = defaultdict(list) # 预计算哪些k块可以覆盖每个j块
+        feasible = True # Mark whether the model is potentially feasible
+        j_subset_potential_covers = defaultdict(list) # Precompute which k-blocks can cover each j-block
         for idx_k, k_subset in enumerate(all_k_subsets):
              for idx_j, j_subset in enumerate(target_j_subsets):
                  if len(j_subset.intersection(k_subset)) >= s:
                      j_subset_potential_covers[idx_j].append(idx_k)
 
         for idx_j, j_subset in enumerate(target_j_subsets):
-            # 找到所有与当前 j_subset 交集 >= s 的 k_subsets 的索引
+            # Find the indices of all k_subsets whose intersection with the current j_subset is >= s
             covering_k_indices = j_subset_potential_covers[idx_j]
 
-            # 检查是否有足够的 k-子集来满足 c 次覆盖
+            # Check if there are enough k-subsets to satisfy c coverage
             if len(covering_k_indices) < c: 
                 print(f"[ILP-{run_idx}] 错误：j-子集 {idx_j} ({set(j_subset)}) 最多只能被 {len(covering_k_indices)} 个 k-子集覆盖，无法满足 c={c} 的要求。问题不可行。") 
                 result['status'] = 'INFEASIBLE' # 直接标记为不可行
                 feasible = False
                 break # 不再添加后续约束，因为已经确定不可行
 
-            # 添加约束：这些候选 k-子集被选中的数量必须 >= c
-            if covering_k_indices: # 只有在有潜在覆盖块时才添加约束
-                model.Add(sum(x[i] for i in covering_k_indices) >= c) # <--- 核心修改：>= c
+            # Add constraint: The number of these candidate k-subsets selected must be >= c
+            if covering_k_indices: # Only add constraints when there are potential covering blocks
+                model.Add(sum(x[i] for i in covering_k_indices) >= c) 
                 constraints_added += 1
-            else: # 如果一个 j-子集没有任何 k-子集能覆盖（且 c>=1），则不可行
+            else: # If a j-subset has no k-subset that can cover it (and c>=1), then it is infeasible
                 if c >= 1: 
                     print(f"[ILP-{run_idx}] 错误：j-子集 {idx_j} ({set(j_subset)}) 没有任何 k-子集能满足交集 >= {s}。问题不可行。")
                     result['status'] = 'INFEASIBLE'
                     feasible = False
                     break
 
-        if not feasible: # 如果在添加约束时检测到不可行
+        if not feasible: 
              result['time'] = time.time() - start_time
              q.put(result)
              return
 
         print(f"[ILP-{run_idx}] 为 {constraints_added}/{num_j_subsets} 个 j-子集添加了覆盖约束。")
 
-        # 6. 定义目标函数: 最小化选中的 k-子集数量
+        # 6. Define the objective function: Minimize the number of selected k-subsets
         model.Minimize(sum(x))
 
-        # 7. 创建求解器并设置参数
+        # 7. Create the solver and set parameters
         solver = cp_model.CpSolver()
         solver.parameters.max_time_in_seconds = float(timeout_solver)
-        # solver.parameters.log_search_progress = True # 可选：显示求解日志
-        # 尝试使用更多worker，如果机器核心数允许
+        # solver.parameters.log_search_progress = True // its a lot of output 
+        # Try using more workers if the machine core count allows
         num_workers = mp.cpu_count()
         if num_workers > 1:
             solver.parameters.num_search_workers = num_workers
@@ -336,11 +331,11 @@ def cpsat_cover(args):
         else:
             print(f"[ILP-{run_idx}] 使用默认数量的 worker 进行求解...")
 
-        # 8. 求解模型
+        # 8. Solve the model
         status = solver.Solve(model)
         result['time'] = time.time() - start_time # 记录总时间
 
-        # 9. 处理结果
+        # 9. Results 
         status_map = {
             cp_model.OPTIMAL: 'OPTIMAL',        # 找到最优解
             cp_model.FEASIBLE: 'FEASIBLE',      # 找到可行解（但可能未证明最优，常见于超时）
