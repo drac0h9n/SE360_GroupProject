@@ -1,310 +1,310 @@
 # main.py
-# 使用 Flet 构建图形用户界面 (GUI)。
-# 处理用户输入，调用 backend 计算，并显示结果。
-# 当 K=6 时，会将结果保存到 SQLite 数据库。
-# 包含手动输入 Universe 和手动指定覆盖条件 c 的选项。
-# 移除了全局 RunCounter，使用 db.py 管理持久化 run_index。
-# **新增了数据库结果管理功能，允许用户查看、显示详情和删除数据库中的记录。**
-# **修改：移除了删除操作的二次确认弹窗。**
-# **修改：添加打印预览功能。**
+# Build a Graphical User Interface (GUI) using Flet.
+# Handle user input, call backend calculations, and display results.
+# When K=6, the results are saved to an SQLite database.
+# Includes options for manually inputting the Universe and specifying the coverage condition c.
+# Removed the global RunCounter, using db.py to manage the persistent run_index.
+# **Added database result management features, allowing users to view, display details of, and delete records from the database.**
+# **Modification: Removed the secondary confirmation dialog for delete operations.**
+# **Modification: Added print preview functionality.**
 
 import flet as ft
 import random
 import time
-import json  # 用于序列化/反序列化列表以便存入/读取数据库
-import sys   # 用于检查命令行参数
-import os    # 用于路径操作
-import threading  # 用于在后台执行计算，避免UI阻塞
-import functools  # 用于 functools.partial (虽然在这个版本中可能没直接用，但保留以备后用)
-from datetime import datetime # 用于格式化时间戳
+import json  # For serializing/deserializing lists to store/retrieve from the database
+import sys   # For checking command-line arguments
+import os    # For path operations
+import threading  # For executing calculations in the background to avoid UI blocking
+import functools  # For functools.partial (though perhaps not directly used in this version, kept for potential future use)
+from datetime import datetime # For formatting timestamps
 
-# 导入后端逻辑和数据库操作
-from backend import Sample, comb, HAS_ORTOOLS  # 导入 Sample 类, comb 函数, HAS_ORTOOLS
-import db  # 导入数据库操作模块 (db.py)
+# Import backend logic and database operations
+from backend import Sample, comb, HAS_ORTOOLS  # Import Sample class, comb function, HAS_ORTOOLS
+import db  # Import the database operations module (db.py)
 
-# --- 全局变量 ---
-random_seed = int(time.time())  # 使用当前时间作为随机种子
+# --- Global Variables ---
+random_seed = int(time.time())  # Use current time as the random seed
 random.seed(random_seed)
-print(f"使用的随机种子: {random_seed}")
+print(f"Using random seed: {random_seed}") # Output: Using random seed: ...
 
-# --- 主应用函数 ---
+# --- Main Application Function ---
 def main(page: ft.Page):
-    """构建并运行 Flet 应用程序的主函数"""
-    page.title = "组合覆盖问题求解器 (含数据库管理)"  # 窗口标题
-    page.theme_mode = ft.ThemeMode.LIGHT  # 主题模式
-    page.vertical_alignment = ft.MainAxisAlignment.START  # 页面垂直对齐方式
-    page.window_width = 900   # 窗口初始宽度
-    page.window_height = 850  # 窗口初始高度
+    """The main function to build and run the Flet application"""
+    page.title = "An Optimal Samples Selection System"  # Window title
+    page.theme_mode = ft.ThemeMode.LIGHT  # Theme mode
+    page.vertical_alignment = ft.MainAxisAlignment.START  # Page vertical alignment
+    page.window_width = 900   # Initial window width
+    page.window_height = 850  # Initial window height
 
-    # --- 状态变量 (用于跨函数共享数据) ---
-    # 使用 ft.Ref 来简化跨函数更新控件或变量值的过程
-    selected_db_result_id = ft.Ref[int]()  # 存储当前在数据库列表中选中的记录的ID
-    db_results_list_data = ft.Ref[list]() # 存储从数据库加载的结果摘要列表 [{id:.., m:.., ...}, ...]
-    db_results_list_data.current = []     # 初始化为空列表
+    # --- State Variables (for sharing data across functions) ---
+    # Using ft.Ref to simplify updating controls or variable values across functions
+    selected_db_result_id = ft.Ref[int]()  # Stores the ID of the currently selected record in the database list
+    db_results_list_data = ft.Ref[list]() # Stores the list of result summaries loaded from the database [{id:.., m:.., ...}, ...]
+    db_results_list_data.current = []     # Initialize as an empty list
 
     # --- ========================== ---
-    # --- UI 控件定义 (计算部分) ---
+    # --- UI Control Definitions (Calculation Part) ---
     # --- ========================== ---
 
-    # ... (计算部分的控件定义保持不变) ...
-    # --- 输入控件 ---
-    txt_m = ft.TextField(label="M (基础集)", hint_text="例如: 45", width=100, value="45")
-    txt_n = ft.TextField(label="N (Universe)", hint_text="例如: 8", width=100, value="8")
-    txt_k = ft.TextField(label="K (块大小)", hint_text="例如: 6", width=100, value="6")
-    txt_j = ft.TextField(label="J (子集)", hint_text="例如: 4", width=100, value="4")
-    txt_s = ft.TextField(label="S (交集>=)", hint_text="例如: 4", width=100, value="4")
-    txt_timeout = ft.TextField(label="超时(s)", hint_text="例如: 60", width=100, value="60")
+    # ... (Control definitions for the calculation part remain unchanged) ...
+    # --- Input Controls ---
+    txt_m = ft.TextField(label="M (Base Set)", hint_text="Example: 45", width=100, value="45")
+    txt_n = ft.TextField(label="N (Universe)", hint_text="Example: 8", width=100, value="8")
+    txt_k = ft.TextField(label="K (Block Size)", hint_text="Example: 6", width=100, value="6")
+    txt_j = ft.TextField(label="J (Subset)", hint_text="Example: 4", width=100, value="4")
+    txt_s = ft.TextField(label="S (Intersection >=)", hint_text="Example: 4", width=100, value="4")
+    txt_timeout = ft.TextField(label="Timeout (s)", hint_text="Example: 60", width=100, value="60")
 
-    # --- Universe 输入选项 ---
-    chk_manual_univ = ft.Checkbox(label="手动输 Universe", value=False, on_change=None) # 复选框，初始未选中
+    # --- Universe Input Options ---
+    chk_manual_univ = ft.Checkbox(label="Manual Universe Input", value=False, on_change=None) # Checkbox, initially unchecked
     txt_manual_univ = ft.TextField(
-        label="输入N个数字(空格分隔, 范围 1~M)",  # 手动输入 Universe 的文本框
-        visible=False,  # 初始隐藏
-        width=600,      # 文本框宽度
-        hint_text="例如: 1 5 10 15 20 25 30 35"
+        label="Enter N numbers (space-separated, range 1~M)",  # Text field for manual Universe input
+        visible=False,  # Initially hidden
+        width=600,      # Text field width
+        hint_text="Example: 1 5 10 15 20 25 30 35"
     )
 
-    # --- 覆盖条件 c 输入选项 --- # MODIFIED: y -> c
-    chk_specify_c = ft.Checkbox(label="手动指定 c (覆盖次数)", value=False, on_change=None) # 复选框 # MODIFIED: y -> c
+    # --- Coverage Condition c Input Options --- # MODIFIED: y -> c
+    chk_specify_c = ft.Checkbox(label="Specify c Manually (Coverage Count)", value=False, on_change=None) # Checkbox # MODIFIED: y -> c
     txt_specify_c = ft.TextField( # MODIFIED: y -> c
-        label="输入 c 值 (范围 1 ~ C(j,s))", # 手动输入 c 的文本框 # MODIFIED: y -> c
-        visible=False,  # 初始隐藏
-        width=250,      # 文本框宽度
-        hint_text="输入正整数c" # MODIFIED: y -> c
+        label="Enter c value (Range 1 ~ C(j,s))", # Text field for manual c input # MODIFIED: y -> c
+        visible=False,  # Initially hidden
+        width=250,      # Text field width
+        hint_text="Enter positive integer c" # MODIFIED: y -> c
     )
 
-    # --- 输出/信息显示控件 ---
-    theoretical_c_info = ft.Text("理论覆盖度 (C(k,s)C(n-k,j-s)): ...", size=12) # 显示理论c值 # MODIFIED: y -> c
-    max_single_j_coverage = ft.Text("单j集最大覆盖 (C(j,s)): ...", size=12) # 显示 C(j,s)
-    # 计算结果显示区域，允许选择文本，设置最大行数，允许内容溢出以便滚动
+    # --- Output/Information Display Controls ---
+    theoretical_c_info = ft.Text("Theoretical Coverage (C(k,s)C(n-k,j-s)): ...", size=12) # Display theoretical c value # MODIFIED: y -> c
+    max_single_j_coverage = ft.Text("Max Coverage per J-subset (C(j,s)): ...", size=12) # Display C(j,s)
+    # Calculation result display area, allows text selection, sets max lines, allows content overflow for scrolling
     sample_result_info = ft.Text(
-        "计算结果将显示在这里...",
+        "Calculation results will be displayed here...", # Output: Calculation results will be displayed here...
         size=12,
-        selectable=True,       # 允许用户选择文本
-        max_lines=25,          # 限制最大显示行数（超出需滚动）
-        overflow=ft.TextOverflow.VISIBLE # 内容溢出时可见（需外部容器支持滚动）
+        selectable=True,       # Allow user to select text
+        max_lines=25,          # Limit maximum display lines (scrolling needed if exceeded)
+        overflow=ft.TextOverflow.VISIBLE # Content is visible when overflowing (requires external container for scrolling)
     )
-    # 日志输出区域，使用 ListView 实现自动滚动
+    # Log output area, using ListView for automatic scrolling
     log_output = ft.ListView(
-        expand=True,           # 允许列表扩展填充空间
-        spacing=5,             # 行间距
-        auto_scroll=True,      # 自动滚动到底部
-        height=200             # 给日志区域一个固定的高度
+        expand=True,           # Allow the list to expand and fill space
+        spacing=5,             # Spacing between lines
+        auto_scroll=True,      # Automatically scroll to the bottom
+        height=200             # Give the log area a fixed height
     )
 
-    # --- 按钮 ---
-    submit_button = ft.ElevatedButton(text="开始计算", on_click=None, icon=ft.icons.PLAY_ARROW) # 触发计算
-    clear_log_button = ft.ElevatedButton(text="清空日志", on_click=lambda _: clear_log(), icon=ft.icons.CLEAR_ALL) # 清空日志区域
+    # --- Buttons ---
+    submit_button = ft.ElevatedButton(text="Start Calculation", on_click=None, icon=ft.icons.PLAY_ARROW) # Trigger calculation
+    clear_log_button = ft.ElevatedButton(text="Clear Log", on_click=lambda _: clear_log(), icon=ft.icons.CLEAR_ALL) # Clear log area
 
-    # --- 进度指示器 ---
-    progress_ring = ft.ProgressRing(visible=False, width=20, height=20, stroke_width = 3) # 计算时显示
+    # --- Progress Indicator ---
+    progress_ring = ft.ProgressRing(visible=False, width=20, height=20, stroke_width = 3) # Displayed during calculation
 
     # --- ============================= ---
-    # --- UI 控件定义 (数据库管理部分) ---
+    # --- UI Control Definitions (Database Management Part) ---
     # --- ============================= ---
 
-    # --- 数据库结果列表和详情控件 ---
-    db_results_list_view = ft.ListView(expand=True, spacing=5) # 显示数据库记录摘要的列表
-    # 显示选中记录详情的文本区域
+    # --- Database Results List and Details Controls ---
+    db_results_list_view = ft.ListView(expand=True, spacing=5) # List view to display database record summaries
+    # Text area to display details of the selected record
     db_result_details_view = ft.Text(
-        "请先在上方选择一条记录，然后点击“显示详情”。",
+        "Please select a record above, then click 'Show Details'.", # Output: Please select a record above, then click 'Show Details'.
         selectable=True,
-        max_lines=20, # 限制行数
+        max_lines=20, # Limit lines
         overflow=ft.TextOverflow.VISIBLE
     )
-    # 使用 RadioGroup 来管理列表的选择，确保一次只能选一个
+    # Use RadioGroup to manage list selection, ensuring only one can be selected at a time
     db_results_radio_group = ft.RadioGroup(
-        content=db_results_list_view, # 将 ListView 作为 RadioGroup 的内容
-        on_change=None # 选择变化的事件处理函数稍后绑定
+        content=db_results_list_view, # Use ListView as the content of RadioGroup
+        on_change=None # Event handler for selection change will be bound later
     )
 
-    # --- 数据库管理按钮 ---
-    show_db_view_button = ft.ElevatedButton("查看/管理数据库结果", icon=ft.icons.STORAGE, on_click=None) # 切换到数据库视图
-    refresh_db_button = ft.ElevatedButton("刷新列表", icon=ft.icons.REFRESH, on_click=None) # 重新加载数据库列表
-    # 显示选中项详情的按钮，初始禁用，直到用户选择了某一项
+    # --- Database Management Buttons ---
+    show_db_view_button = ft.ElevatedButton("View/Manage Database Results", icon=ft.icons.STORAGE, on_click=None) # Switch to database view
+    refresh_db_button = ft.ElevatedButton("Refresh List", icon=ft.icons.REFRESH, on_click=None) # Reload the database list
+    # Button to display details of the selected item, initially disabled until a user selects an item
     display_details_button = ft.ElevatedButton(
-        "显示详情",
+        "Show Details",
         icon=ft.icons.VISIBILITY,
         on_click=None,
-        disabled=True # 初始禁用
+        disabled=True # Initially disabled
     )
-    # 删除选中项的按钮，初始禁用，红色以示警告
+    # Button to delete the selected item, initially disabled, red color as a warning
     delete_selected_button = ft.ElevatedButton(
-        "删除所选",
+        "Delete Selected",
         icon=ft.icons.DELETE_FOREVER,
-        on_click=None, # <-- **修改点**: on_click 将直接绑定到 execute_delete
-        color=ft.colors.RED, # 按钮文字颜色为红色
-        disabled=True # 初始禁用
+        on_click=None, # <-- **Modification**: on_click will be directly bound to execute_delete
+        color=ft.colors.RED, # Button text color is red
+        disabled=True # Initially disabled
     )
-    # /// NEW: 添加打印按钮
+    # /// NEW: Add Print button
     print_selected_button = ft.ElevatedButton(
-        "打印",
+        "Print",
         icon=ft.icons.PRINT,
-        on_click=None, # 稍后绑定
-        disabled=True # 初始禁用
+        on_click=None, # Bind later
+        disabled=True # Initially disabled
     )
-    # 从数据库视图返回主计算界面的按钮
-    back_to_main_button = ft.ElevatedButton("返回计算界面", icon=ft.icons.ARROW_BACK, on_click=None)
+    # Button to return from the database view to the main calculation interface
+    back_to_main_button = ft.ElevatedButton("Back to Calculation Interface", icon=ft.icons.ARROW_BACK, on_click=None)
 
-    # --- 数据库结果详情容器 ---
+    # --- Database Result Details Container ---
     db_details_container = ft.Container(
-        content=db_result_details_view, # 包裹详情文本控件
-        border=ft.border.all(1, ft.colors.BLACK26), # 添加边框
-        border_radius=ft.border_radius.all(5),      # 圆角边框
-        padding=10,                                # 内边距
-        margin=ft.margin.only(top=10),             # 上外边距
-        expand=True,                               # 允许容器扩展填充垂直空间
+        content=db_result_details_view, # Wrap the details text control
+        border=ft.border.all(1, ft.colors.BLACK26), # Add a border
+        border_radius=ft.border_radius.all(5),      # Rounded border corners
+        padding=10,                                # Inner padding
+        margin=ft.margin.only(top=10),             # Top outer margin
+        expand=True,                               # Allow container to expand and fill vertical space
     )
 
-    # --- 数据库结果管理视图的整体容器 (初始隐藏) ---
+    # --- Overall Container for Database Result Management View (Initially hidden) ---
     db_management_view = ft.Column(
         [
-            ft.Text("数据库结果列表", size=16, weight=ft.FontWeight.BOLD), # 标题
-            # /// MODIFIED: 将打印按钮加入此行
+            ft.Text("Database Results List", size=16, weight=ft.FontWeight.BOLD), # Title
+            # /// MODIFIED: Add Print button to this row
             ft.Row(
                 [refresh_db_button, display_details_button, delete_selected_button, print_selected_button, back_to_main_button],
-                spacing=10, # 按钮间距
-                wrap=True   # 允许按钮在空间不足时换行
+                spacing=10, # Spacing between buttons
+                wrap=True   # Allow buttons to wrap to the next line if space is insufficient
             ),
-            ft.Text("选择一条记录进行操作:", size=12), # 提示文字
-            # 放置数据库结果列表的容器，设置边框和固定高度
+            ft.Text("Select a record to operate on:", size=12), # Hint text
+            # Container for the database results list, set border and fixed height
             ft.Container(
-                content=db_results_radio_group, # 包含 RadioGroup (内含 ListView)
+                content=db_results_radio_group, # Contains RadioGroup (which includes ListView)
                 border=ft.border.all(1, ft.colors.BLACK12),
                 border_radius=ft.border_radius.all(5),
                 padding=5,
-                height=300 # 给列表区域一个固定的高度
+                height=300 # Give the list area a fixed height
             ),
-            ft.Container( # 使用 Container 来包裹 Text，并应用 margin
-                content=ft.Text("选中记录详情", size=14, weight=ft.FontWeight.BOLD), # Text 不再有 margin 属性
-                margin=ft.margin.only(top=10) # 将 margin 应用于包含 Text 的 Container
+            ft.Container( # Use a Container to wrap the Text and apply margin
+                content=ft.Text("Selected Record Details", size=14, weight=ft.FontWeight.BOLD), # Text no longer has margin property
+                margin=ft.margin.only(top=10) # Apply margin to the Container holding the Text
             ),
-            db_details_container # 详情显示容器
+            db_details_container # Details display container
         ],
-        visible=False, # 数据库管理视图初始时隐藏
-        expand=True    # 允许此视图在垂直方向上扩展
+        visible=False, # Database management view is initially hidden
+        expand=True    # Allow this view to expand vertically
     )
 
     # --- ======================== ---
-    # /// NEW: UI 控件定义 (打印部分) ---
+    # /// NEW: UI Control Definitions (Print Part) ---
     # --- ======================== ---
-    print_details_display = ft.Text( # 用于显示打印内容的文本控件
+    print_details_display = ft.Text( # Text control to display content for printing
         "...",
         selectable=True,
         size=12,
-        overflow=ft.TextOverflow.VISIBLE # 允许内容溢出
+        overflow=ft.TextOverflow.VISIBLE # Allow content overflow
     )
 
-    print_back_button = ft.ElevatedButton( # 从打印视图返回数据库视图的按钮
-        "返回数据库列表",
+    print_back_button = ft.ElevatedButton( # Button to return from print view to database view
+        "Back to Database List",
         icon=ft.icons.ARROW_BACK,
-        on_click=None # 稍后绑定
+        on_click=None # Bind later
     )
 
-    print_preview_view = ft.Column( # 打印预览视图的整体容器
+    print_preview_view = ft.Column( # Overall container for the print preview view
         [
             ft.Row(
                 [
-                    ft.Text("打印预览 - 记录详情", size=16, weight=ft.FontWeight.BOLD),
-                    print_back_button # 返回按钮放在标题旁边
+                    ft.Text("Print Preview - Record Details", size=16, weight=ft.FontWeight.BOLD),
+                    print_back_button # Place the back button next to the title
                 ],
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN # 使标题和按钮分布在两端
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN # Distribute title and button to opposite ends
             ),
             ft.Divider(),
-            ft.Container( # 容器用于显示内容，带滚动条
+            ft.Container( # Container to display content, with scrollbar
                 ft.Column(
-                    [print_details_display], # 包含显示内容的 Text
-                    scroll=ft.ScrollMode.ADAPTIVE # 当内容过多时允许滚动
+                    [print_details_display], # Contains the Text displaying content
+                    scroll=ft.ScrollMode.ADAPTIVE # Allow scrolling when content is excessive
                 ),
                 border=ft.border.all(1, ft.colors.BLACK26),
                 border_radius=ft.border_radius.all(5),
                 padding=10,
                 margin=ft.margin.only(top=10),
-                expand=True # 允许内容区域扩展填充垂直空间
+                expand=True # Allow the content area to expand and fill vertical space
             )
         ],
-        visible=False, # 打印预览视图初始隐藏
-        expand=True    # 允许此视图在垂直方向上扩展
+        visible=False, # Print preview view initially hidden
+        expand=True    # Allow this view to expand vertically
     )
 
     # --- ========================== ---
-    # --- 辅助函数和事件处理函数 ---
+    # --- Helper Functions and Event Handlers ---
     # --- ========================== ---
 
-    # ... (log_message, clear_log, show_info_message, set_busy, validate_and_get_int, update_c_related_info, on_manual_univ_change, on_specify_c_change 等函数保持不变) ...
-    # --- 日志函数 ---
+    # ... (log_message, clear_log, show_info_message, set_busy, validate_and_get_int, update_c_related_info, on_manual_univ_change, on_specify_c_change etc. functions remain unchanged) ...
+    # --- Logging Function ---
     def log_message(message: str, is_error: bool = False):
-        """向日志区域 (log_output) 添加一条带时间戳的消息"""
-        timestamp = time.strftime("%H:%M:%S", time.localtime()) # 获取当前时间
-        color = ft.colors.RED if is_error else ft.colors.BLACK87 # 错误消息用红色
+        """Adds a timestamped message to the log area (log_output)"""
+        timestamp = time.strftime("%H:%M:%S", time.localtime()) # Get current time
+        color = ft.colors.RED if is_error else ft.colors.BLACK87 # Use red for error messages
         log_output.controls.append(ft.Text(f"[{timestamp}] {message}", size=11, selectable=True, color=color))
-        # Flet 是响应式的，但有时显式调用 page.update() 能确保 UI 立即刷新
+        # Flet is reactive, but sometimes explicitly calling page.update() ensures immediate UI refresh
         page.update()
 
     def clear_log():
-        """清空日志区域"""
+        """Clears the log area"""
         log_output.controls.clear()
-        log_message("日志已清空。")
+        log_message("Log cleared.") # Output: Log cleared.
         page.update()
 
-    # --- 显示信息/错误 的辅助函数 ---
+    # --- Helper Function to Display Info/Error Messages ---
     def show_info_message(text_control: ft.Text, message: str, is_error: bool = False):
-        """更新指定的 Text 控件 (如 sample_result_info 或 db_result_details_view) 来显示信息或错误"""
-        text_control.value = message # 设置文本内容
-        text_control.color = ft.colors.RED if is_error else ft.colors.BLACK # 设置文本颜色
+        """Updates the specified Text control (like sample_result_info or db_result_details_view) to display information or errors"""
+        text_control.value = message # Set the text content
+        text_control.color = ft.colors.RED if is_error else ft.colors.BLACK # Set the text color
         page.update()
 
-    # --- 控制 UI 繁忙状态的函数 ---
+    # --- Function to Control UI Busy State ---
     def set_busy(busy: bool):
-        """控制按钮和进度环的启用/禁用状态，以及输入控件的禁用状态"""
-        submit_button.disabled = busy        # 禁用/启用提交按钮
-        progress_ring.visible = busy         # 显示/隐藏进度环
-        show_db_view_button.disabled = busy  # 计算时禁用切换数据库视图按钮
+        """Controls the enabled/disabled state of buttons and the progress ring, and the disabled state of input controls"""
+        submit_button.disabled = busy        # Disable/enable submit button
+        progress_ring.visible = busy         # Show/hide progress ring
+        show_db_view_button.disabled = busy  # Disable switching to database view during calculation
 
-        # 禁用/启用计算相关的输入框和复选框
+        # Disable/enable calculation-related input fields and checkboxes
         for ctrl in [txt_m, txt_n, txt_k, txt_j, txt_s, txt_timeout, chk_manual_univ, txt_manual_univ, chk_specify_c, txt_specify_c]: # MODIFIED: y -> c
             ctrl.disabled = busy
 
-        # 注意：数据库管理视图的按钮启用/禁用状态由其自身逻辑管理 (如选择后才启用详情/删除/打印)
-        # 但可以在这里统一处理，如果需要的话 (例如，计算时完全禁用数据库操作)
+        # Note: The enabled/disabled state of database management view buttons is managed by their own logic (e.g., enabled only after selection)
+        # But they can be handled uniformly here if needed (e.g., completely disable database operations during calculation)
         refresh_db_button.disabled = busy
         is_selection_made = selected_db_result_id.current is not None
-        display_details_button.disabled = busy or not is_selection_made # 结合原有逻辑
-        delete_selected_button.disabled = busy or not is_selection_made # 结合原有逻辑
-        print_selected_button.disabled = busy or not is_selection_made # /// MODIFIED: 控制打印按钮
+        display_details_button.disabled = busy or not is_selection_made # Combine with existing logic
+        delete_selected_button.disabled = busy or not is_selection_made # Combine with existing logic
+        print_selected_button.disabled = busy or not is_selection_made # /// MODIFIED: Control Print button
 
-        back_to_main_button.disabled = busy # 计算时不允许返回
+        back_to_main_button.disabled = busy # Disallow returning during calculation
 
-        page.update() # 应用状态更改
+        page.update() # Apply state changes
 
-    # --- 输入验证和处理 ---
+    # --- Input Validation and Processing ---
     def validate_and_get_int(field: ft.TextField, name: str, min_val: int = 0) -> int | None:
-        """验证输入框 (field) 的值是否为整数，且不小于 min_val。
-           如果有效，返回整数值；否则返回 None，记录日志，并设置输入框的错误提示。"""
-        field.error_text = None # 清除之前的错误状态
+        """Validates if the value in the input field (field) is an integer and not less than min_val.
+           Returns the integer value if valid; otherwise returns None, logs a message, and sets the field's error text."""
+        field.error_text = None # Clear previous error state
         field.update()
         try:
-            value = int(field.value.strip()) # 获取值并去除首尾空格，尝试转为整数
-            if value < min_val: # 检查是否小于最小值
-                msg = f"错误: {name} ({value}) 不能小于 {min_val}。"
+            value = int(field.value.strip()) # Get value, remove leading/trailing spaces, try converting to int
+            if value < min_val: # Check if less than minimum value
+                msg = f"Error: {name} ({value}) cannot be less than {min_val}." # Output: Error: ... cannot be less than ...
                 log_message(msg, is_error=True)
-                show_info_message(sample_result_info, f"输入错误: {name} 不能小于 {min_val}。", is_error=True) # 在主结果区显示错误
-                field.error_text = f"不能小于 {min_val}" # 设置输入框旁边的小错误提示
+                show_info_message(sample_result_info, f"Input Error: {name} cannot be less than {min_val}.", is_error=True) # Display error in main result area # Output: Input Error: ... cannot be less than ...
+                field.error_text = f"Cannot be less than {min_val}" # Set small error hint next to the input field # Output: Cannot be less than ...
                 field.update()
-                return None # 返回 None 表示验证失败
-            return value # 验证通过，返回整数值
-        except ValueError: # 捕捉转换整数失败的异常
-            msg = f"错误: {name} ('{field.value}') 必须是一个有效的整数。"
+                return None # Return None indicating validation failure
+            return value # Validation passed, return integer value
+        except ValueError: # Catch exception if integer conversion fails
+            msg = f"Error: {name} ('{field.value}') must be a valid integer." # Output: Error: ... must be a valid integer.
             log_message(msg, is_error=True)
-            show_info_message(sample_result_info, f"输入错误: {name} 必须是一个整数。", is_error=True)
-            field.error_text = "必须是整数"
+            show_info_message(sample_result_info, f"Input Error: {name} must be an integer.", is_error=True) # Output: Input Error: ... must be an integer.
+            field.error_text = "Must be an integer" # Output: Must be an integer
             field.update()
             return None
 
-    # --- 动态更新 c 相关信息 --- # MODIFIED: y -> c
+    # --- Dynamically Update c-Related Information --- # MODIFIED: y -> c
     def update_c_related_info(e=None): # MODIFIED: y -> c
-        """当 N, K, J, S 输入框的值改变时，重新计算并更新理论 c 值 (理论覆盖度) 和 C(j,s) (单j集最大覆盖) 的显示。""" # MODIFIED: y -> c
-        # 安全地获取输入值，如果无效则为 None
+        """Recalculates and updates the display of the theoretical c value (Theoretical Coverage) and C(j,s) (Max Coverage per J-subset) when N, K, J, S input fields change.""" # MODIFIED: y -> c
+        # Safely get input values, None if invalid
         n_str, k_str, j_str, s_str = txt_n.value, txt_k.value, txt_j.value, txt_s.value
         n, k, j, s = None, None, None, None
         try: n = int(n_str.strip()) if n_str.strip() else None
@@ -313,329 +313,329 @@ def main(page: ft.Page):
         except ValueError: pass
         try: j = int(j_str.strip()) if j_str.strip() else None
         except ValueError: pass
-        try: s = int(s_str.strip()) if s_str is not None and s_str.strip() != "" else None # s=0 是有效的
+        try: s = int(s_str.strip()) if s_str is not None and s_str.strip() != "" else None # s=0 is valid
         except ValueError: pass
 
-        # --- 更新 C(j,s) 显示 ---
-        max_single_cov_val_str = "等待有效 J, S..." # 默认提示
-        max_single_j_coverage.color = ft.colors.GREY # 默认灰色
-        max_c_limit = 0 # 存储 C(j,s) 的计算结果，用于手动 c 输入框的范围提示 # MODIFIED: y -> c
+        # --- Update C(j,s) display ---
+        max_single_cov_val_str = "Waiting for valid J, S..." # Default hint # Output: Waiting for valid J, S...
+        max_single_j_coverage.color = ft.colors.GREY # Default grey
+        max_c_limit = 0 # Store the result of C(j,s) calculation for the range hint of manual c input # MODIFIED: y -> c
 
-        if j is not None and s is not None and j >= 0 and s >= 0: # 确保 j 和 s 是有效的非负整数
+        if j is not None and s is not None and j >= 0 and s >= 0: # Ensure j and s are valid non-negative integers
             try:
                 if j < s:
                     max_single_cov_val = 0
-                    max_single_cov_val_str = f"C({j},{s}): 0 (因 j < s)"
-                    max_single_j_coverage.color = ft.colors.ORANGE # 橙色提示
+                    max_single_cov_val_str = f"C({j},{s}): 0 (because j < s)" # Output: C(...,...): 0 (because j < s)
+                    max_single_j_coverage.color = ft.colors.ORANGE # Orange hint
                 else:
-                    max_single_cov_val = comb(j, s) # 调用 backend 的 comb 函数计算组合数
+                    max_single_cov_val = comb(j, s) # Call backend comb function to calculate combinations
                     max_single_cov_val_str = f"C({j},{s}): {max_single_cov_val}"
-                    max_single_j_coverage.color = ft.colors.BLACK # 正常黑色显示
-                    max_c_limit = max_single_cov_val # 更新 c 的上限 # MODIFIED: y -> c
-                # 更新手动 c 输入框的标签，提示有效范围 # MODIFIED: y -> c
-                txt_specify_c.label = f"输入 c 值 (1 ~ {max_c_limit})" if max_c_limit > 0 else "输入 c 值 (无效或无需)" # MODIFIED: y -> c twice
+                    max_single_j_coverage.color = ft.colors.BLACK # Normal black display
+                    max_c_limit = max_single_cov_val # Update the upper limit for c # MODIFIED: y -> c
+                # Update the label of the manual c input field to hint the valid range # MODIFIED: y -> c
+                txt_specify_c.label = f"Enter c value (1 ~ {max_c_limit})" if max_c_limit > 0 else "Enter c value (invalid or not needed)" # MODIFIED: y -> c twice # Output: Enter c value (1 ~ ...) or Enter c value (invalid or not needed)
                 txt_specify_c.update() # MODIFIED: y -> c
-            except ValueError as combo_err: # 捕捉 comb 函数可能抛出的参数错误
-                 max_single_cov_val_str = f"C({j},{s}): 计算错误 ({combo_err})"
-                 max_single_j_coverage.color = ft.colors.RED # 红色错误提示
-                 txt_specify_c.label = "输入 c 值 (需有效J,S)" # MODIFIED: y -> c
+            except ValueError as combo_err: # Catch parameter errors from comb function
+                 max_single_cov_val_str = f"C({j},{s}): Calculation error ({combo_err})" # Output: C(...,...): Calculation error (...)
+                 max_single_j_coverage.color = ft.colors.RED # Red error hint
+                 txt_specify_c.label = "Enter c value (requires valid J,S)" # MODIFIED: y -> c # Output: Enter c value (requires valid J,S)
                  txt_specify_c.update() # MODIFIED: y -> c
-            except Exception as calc_err: # 捕捉其他可能的计算错误
-                 max_single_cov_val_str = f"C({j},{s}): 未知错误 ({calc_err})"
+            except Exception as calc_err: # Catch other possible calculation errors
+                 max_single_cov_val_str = f"C({j},{s}): Unknown error ({calc_err})" # Output: C(...,...): Unknown error (...)
                  max_single_j_coverage.color = ft.colors.RED
-                 txt_specify_c.label = "输入 c 值 (计算错误)" # MODIFIED: y -> c
+                 txt_specify_c.label = "Enter c value (calculation error)" # MODIFIED: y -> c # Output: Enter c value (calculation error)
                  txt_specify_c.update() # MODIFIED: y -> c
-        else: # 如果 j 或 s 无效
-             txt_specify_c.label = "输入 c 值 (需有效J,S)" # MODIFIED: y -> c
+        else: # If j or s is invalid
+             txt_specify_c.label = "Enter c value (requires valid J,S)" # MODIFIED: y -> c # Output: Enter c value (requires valid J,S)
              txt_specify_c.update() # MODIFIED: y -> c
-        # 更新显示 C(j,s) 的文本控件
-        max_single_j_coverage.value = f"单j集最大覆盖 (C(j,s)): {max_single_cov_val_str}"
+        # Update the text control displaying C(j,s)
+        max_single_j_coverage.value = f"Max Coverage per J-subset (C(j,s)): {max_single_cov_val_str}" # Output: Max Coverage per J-subset (C(j,s)): ...
 
-        # --- 更新理论 c = C(k,s)*C(n-k,j-s) 显示 --- # MODIFIED: y -> c
-        theoretical_c_val_str = "等待有效 N, K, J, S..." # 默认提示 # MODIFIED: y -> c
-        theoretical_c_info.color = ft.colors.GREY       # 默认灰色 # MODIFIED: y -> c
+        # --- Update theoretical c = C(k,s)*C(n-k,j-s) display --- # MODIFIED: y -> c
+        theoretical_c_val_str = "Waiting for valid N, K, J, S..." # Default hint # MODIFIED: y -> c # Output: Waiting for valid N, K, J, S...
+        theoretical_c_info.color = ft.colors.GREY       # Default grey # MODIFIED: y -> c
 
-        # 确保 n, k, j, s 都是有效的非负整数
+        # Ensure n, k, j, s are all valid non-negative integers
         if n is not None and k is not None and j is not None and s is not None and all(v >= 0 for v in [n,k,j,s]):
             try:
-                 # 检查组合数的参数是否有效
+                 # Check if parameters for combinations are valid
                  term1_valid = (k >= s)
-                 term2_valid = (n - k >= j - s) and (j >= s) # 注意 (n-k) 和 (j-s) 都必须非负
-                 params_logic_valid = (n >= k and n >= j) # 基础逻辑检查
+                 term2_valid = (n - k >= j - s) and (j >= s) # Note: (n-k) and (j-s) must both be non-negative
+                 params_logic_valid = (n >= k and n >= j) # Basic logic check
 
                  if not params_logic_valid:
-                      theoretical_c_val_str = "参数无效 (N需>=K且>=J)" # MODIFIED: y -> c
+                      theoretical_c_val_str = "Invalid parameters (N must be >= K and >= J)" # MODIFIED: y -> c # Output: Invalid parameters (N must be >= K and >= J)
                       theoretical_c_info.color = ft.colors.ORANGE # MODIFIED: y -> c
-                 elif not term1_valid or not term2_valid: # 如果任一组合数参数无效
+                 elif not term1_valid or not term2_valid: # If any combination parameter is invalid
                      theoretical_c_value = 0 # MODIFIED: y -> c
                      invalid_term = ""
                      if not term1_valid: invalid_term += " C(k,s)"
                      if not term2_valid: invalid_term += " C(n-k,j-s)"
-                     theoretical_c_val_str = f"0 (因组合项无效:{invalid_term.strip()})" # MODIFIED: y -> c
-                     theoretical_c_info.color = ft.colors.BLACK # 结果是0，但原因明确，用黑色 # MODIFIED: y -> c
+                     theoretical_c_val_str = f"0 (due to invalid combination term(s):{invalid_term.strip()})" # MODIFIED: y -> c # Output: 0 (due to invalid combination term(s):...)
+                     theoretical_c_info.color = ft.colors.BLACK # Result is 0, but reason is clear, use black # MODIFIED: y -> c
                  else:
-                    comb1 = comb(k, s)       # 计算 C(k,s)
-                    comb2 = comb(n - k, j - s) # 计算 C(n-k, j-s)
-                    theoretical_c_value = comb1 * comb2 # 计算理论 c 值 # MODIFIED: y -> c twice
+                    comb1 = comb(k, s)       # Calculate C(k,s)
+                    comb2 = comb(n - k, j - s) # Calculate C(n-k, j-s)
+                    theoretical_c_value = comb1 * comb2 # Calculate theoretical c value # MODIFIED: y -> c twice
                     theoretical_c_val_str = f"{theoretical_c_value} (C({k},{s})={comb1} * C({n-k},{j-s})={comb2})" # MODIFIED: y -> c twice
-                    theoretical_c_info.color = ft.colors.BLACK # 正常黑色 # MODIFIED: y -> c
-            except ValueError as combo_error: # 捕捉计算组合数时的错误
-                 theoretical_c_val_str = f"计算错误 ({combo_error})" # MODIFIED: y -> c
+                    theoretical_c_info.color = ft.colors.BLACK # Normal black # MODIFIED: y -> c
+            except ValueError as combo_error: # Catch errors during combination calculation
+                 theoretical_c_val_str = f"Calculation error ({combo_error})" # MODIFIED: y -> c # Output: Calculation error (...)
                  theoretical_c_info.color = ft.colors.RED # MODIFIED: y -> c
-            except Exception as calc_error:   # 捕捉其他计算错误
-                 theoretical_c_val_str = f"未知错误 ({calc_error})" # MODIFIED: y -> c
+            except Exception as calc_error:   # Catch other calculation errors
+                 theoretical_c_val_str = f"Unknown error ({calc_error})" # MODIFIED: y -> c # Output: Unknown error (...)
                  theoretical_c_info.color = ft.colors.RED # MODIFIED: y -> c
-        # 更新显示理论 c 值的文本控件 # MODIFIED: y -> c
-        theoretical_c_info.value = f"理论覆盖度 (C(k,s)C(n-k,j-s)): {theoretical_c_val_str}" # MODIFIED: y -> c twice
+        # Update the text control displaying the theoretical c value # MODIFIED: y -> c
+        theoretical_c_info.value = f"Theoretical Coverage (C(k,s)C(n-k,j-s)): {theoretical_c_val_str}" # MODIFIED: y -> c twice # Output: Theoretical Coverage (C(k,s)C(n-k,j-s)): ...
 
-        page.update() # 更新页面显示
+        page.update() # Update page display
 
-    # --- 绑定 N, K, J, S 输入框的 on_change 事件 ---
+    # --- Bind on_change events for N, K, J, S input fields ---
     txt_n.on_change = update_c_related_info # MODIFIED: y -> c
     txt_k.on_change = update_c_related_info # MODIFIED: y -> c
     txt_j.on_change = update_c_related_info # MODIFIED: y -> c
     txt_s.on_change = update_c_related_info # MODIFIED: y -> c
 
-    # --- Checkbox 事件处理 ---
+    # --- Checkbox Event Handlers ---
     def on_manual_univ_change(e):
-        """当“手动输入 Universe”复选框状态改变时，切换对应文本框的可见性"""
+        """Toggles the visibility of the corresponding text field when the 'Manual Universe Input' checkbox state changes"""
         is_manual = chk_manual_univ.value
-        txt_manual_univ.visible = is_manual # 设置文本框可见性
-        if not is_manual: # 如果取消勾选
-            txt_manual_univ.value = ""        # 清空文本框内容
-            txt_manual_univ.error_text = None # 清除错误提示
-            txt_manual_univ.update()          # 更新文本框
-        # 为了更好的布局，我们将文本框放在一个 Row 中，并切换 Row 的可见性
-        manual_univ_row = txt_manual_univ.parent # 获取包含文本框的父级 Row
+        txt_manual_univ.visible = is_manual # Set text field visibility
+        if not is_manual: # If unchecked
+            txt_manual_univ.value = ""        # Clear text field content
+            txt_manual_univ.error_text = None # Clear error hint
+            txt_manual_univ.update()          # Update text field
+        # For better layout, we put the text field in a Row and toggle the Row's visibility
+        manual_univ_row = txt_manual_univ.parent # Get the parent Row containing the text field
         if manual_univ_row:
-            manual_univ_row.visible = is_manual # 设置 Row 的可见性
-        page.update() # 更新页面
+            manual_univ_row.visible = is_manual # Set Row visibility
+        page.update() # Update page
 
     def on_specify_c_change(e): # MODIFIED: y -> c
-        """当“手动指定 c”复选框状态改变时，切换对应文本框的可见性""" # MODIFIED: y -> c
+        """Toggles the visibility of the corresponding text field when the 'Specify c Manually' checkbox state changes""" # MODIFIED: y -> c
         is_manual = chk_specify_c.value # MODIFIED: y -> c
         txt_specify_c.visible = is_manual # MODIFIED: y -> c
         if not is_manual:
             txt_specify_c.value = "" # MODIFIED: y -> c
             txt_specify_c.error_text = None # MODIFIED: y -> c
             txt_specify_c.update() # MODIFIED: y -> c
-        # 同样，切换包含文本框的 Row 的可见性
+        # Similarly, toggle the visibility of the Row containing the text field
         specify_c_row = txt_specify_c.parent # MODIFIED: y -> c twice
         if specify_c_row: # MODIFIED: y -> c
             specify_c_row.visible = is_manual # MODIFIED: y -> c
         page.update()
 
-    # --- 绑定 Checkbox 的 on_change 事件 ---
+    # --- Bind on_change events for Checkboxes ---
     chk_manual_univ.on_change = on_manual_univ_change
     chk_specify_c.on_change = on_specify_c_change # MODIFIED: y -> c twice
 
     # --- ================================ ---
-    # --- 数据库结果管理部分的逻辑函数 ---
+    # --- Logic Functions for Database Result Management ---
     # --- ================================ ---
 
     def format_result_summary(result_item: dict) -> str:
-        """将从数据库获取的单条结果摘要字典格式化为易于阅读的字符串，用于列表显示。
-           **修改版格式**: ID: X | M-N-K-J-S-RunIndex-Y | 时间戳
+        """Formats a single result summary dictionary fetched from the database into a readable string for list display.
+           **Modified Format**: ID: X | M-N-K-J-S-RunIndex-Y | Timestamp
         """
-        # ... (此函数不变) ...
+        # ... (This function remains unchanged) ...
         try:
-            # 尝试解析 ISO 格式的时间戳
+            # Try parsing ISO format timestamp
             timestamp_dt = datetime.fromisoformat(result_item['timestamp']) if result_item.get('timestamp') else datetime.now()
         except ValueError:
-            # 如果解析失败，提供一个备用显示或记录错误
-            timestamp_dt = datetime.now() # 或者 None
-            print(f"警告：无法解析时间戳 '{result_item.get('timestamp')}' for ID {result_item.get('id')}")
+            # Provide an alternative display or log error if parsing fails
+            timestamp_dt = datetime.now() # Or None
+            print(f"Warning: Could not parse timestamp '{result_item.get('timestamp')}' for ID {result_item.get('id')}") # Output: Warning: Could not parse timestamp '...' for ID ...
 
-        # 格式化时间戳
+        # Format the timestamp
         time_str = timestamp_dt.strftime('%Y-%m-%d %H:%M') if timestamp_dt else "N/A"
 
-        # 构建包含 M, N, K, J, S, RunIndex 和 NumResults (Y) 的字符串段
+        # Build the string segment containing M, N, K, J, S, RunIndex, and NumResults (Y)
         params_run_num_str = (f"{result_item.get('m','?')}-"
                               f"{result_item.get('n','?')}-"
                               f"{result_item.get('k','?')}-"
                               f"{result_item.get('j','?')}-"
                               f"{result_item.get('s','?')}-"
-                              f"{result_item.get('run_index','?')}-"  # 连接 RunIndex
-                              f"{result_item.get('num_results','?')}") # 直接连接 NumResults (Y)
+                              f"{result_item.get('run_index','?')}-"  # Append RunIndex
+                              f"{result_item.get('num_results','?')}") # Directly append NumResults (Y)
 
-        # 构建最终的摘要字符串，使用修改后的格式
+        # Build the final summary string using the modified format
         return (f"ID: {result_item.get('id', 'N/A')} | "
-                f"{params_run_num_str} | " # 使用新的组合字符串段
+                f"{params_run_num_str} | " # Use the new combined string segment
                 f"{time_str}")
 
     def update_db_list_view():
-        """根据全局状态 `db_results_list_data.current` 更新数据库结果列表 UI (ListView)"""
-        # ... (基本不变，只是在清除选择时，也重置打印预览详情) ...
-        db_results_list_view.controls.clear() # 清空现有列表项
-        if not db_results_list_data.current: # 如果数据为空
-            db_results_list_view.controls.append(ft.Text("数据库中没有结果记录。"))
+        """Updates the database results list UI (ListView) based on the global state `db_results_list_data.current`"""
+        # ... (Basically unchanged, just resets print preview details when selection is cleared) ...
+        db_results_list_view.controls.clear() # Clear existing list items
+        if not db_results_list_data.current: # If data is empty
+            db_results_list_view.controls.append(ft.Text("No result records found in the database.")) # Output: No result records found in the database.
         else:
-            # 遍历数据，为每条记录创建一个 Radio 按钮
+            # Iterate through data, create a Radio button for each record
             for item in db_results_list_data.current:
-                summary_text = format_result_summary(item) # 获取格式化后的摘要文本
-                # 每个列表项是一个 Radio 按钮，value 存储该记录的数据库 ID (转为字符串)
+                summary_text = format_result_summary(item) # Get formatted summary text
+                # Each list item is a Radio button, its value stores the record's database ID (as a string)
                 db_results_list_view.controls.append(
                     ft.Radio(value=str(item['id']), label=summary_text)
                 )
-        # 清除之前的选择状态和详情显示
-        db_results_radio_group.value = None        # 清除 RadioGroup 的选中值
-        selected_db_result_id.current = None       # 清除全局存储的选中 ID
-        db_result_details_view.value = "请先在上方选择一条记录，然后点击“显示详情”。" # 重置详情区提示
-        print_details_display.value = ""           # /// NEW: 清空打印预览区
-        display_details_button.disabled = True     # 禁用“显示详情”按钮
-        delete_selected_button.disabled = True     # 禁用“删除所选”按钮
-        print_selected_button.disabled = True     # /// NEW: 禁用“打印”按钮
-        page.update() # 更新 UI
+        # Clear previous selection state and details display
+        db_results_radio_group.value = None        # Clear RadioGroup's selected value
+        selected_db_result_id.current = None       # Clear globally stored selected ID
+        db_result_details_view.value = "Please select a record above, then click 'Show Details'." # Reset details area hint # Output: Please select a record above, then click 'Show Details'.
+        print_details_display.value = ""           # /// NEW: Clear print preview area
+        display_details_button.disabled = True     # Disable 'Show Details' button
+        delete_selected_button.disabled = True     # Disable 'Delete Selected' button
+        print_selected_button.disabled = True      # /// NEW: Disable 'Print' button
+        page.update() # Update UI
 
     def load_db_results(e=None):
-        """从数据库加载结果摘要列表，并更新 UI"""
-        # ... (此函数不变) ...
-        log_message("正在从数据库加载结果列表...")
+        """Loads the result summary list from the database and updates the UI"""
+        # ... (This function remains unchanged) ...
+        log_message("Loading result list from database...") # Output: Loading result list from database...
         try:
-            results = db.get_results_summary() # 调用 db 模块的函数获取摘要列表
-            db_results_list_data.current = results # 更新全局状态变量
-            update_db_list_view() # 使用新数据更新 ListView 界面
-            log_message(f"成功加载 {len(results)} 条结果摘要。")
-        except Exception as ex: # 捕捉可能的数据库或其他错误
-            msg = f"加载数据库结果列表时出错: {ex}"
+            results = db.get_results_summary() # Call db module function to get summary list
+            db_results_list_data.current = results # Update global state variable
+            update_db_list_view() # Update ListView interface with new data
+            log_message(f"Successfully loaded {len(results)} result summaries.") # Output: Successfully loaded ... result summaries.
+        except Exception as ex: # Catch potential database or other errors
+            msg = f"Error loading database result list: {ex}" # Output: Error loading database result list: ...
             log_message(msg, is_error=True)
-            # 可以在详情区域显示错误信息
-            show_info_message(db_result_details_view, f"错误: {msg}", is_error=True)
-            db_results_list_data.current = [] # 出错时清空数据
-            update_db_list_view() # 更新 UI 为空列表状态
+            # Can display error message in the details area
+            show_info_message(db_result_details_view, f"Error: {msg}", is_error=True) # Output: Error: ...
+            db_results_list_data.current = [] # Clear data on error
+            update_db_list_view() # Update UI to empty list state
         finally:
-             page.update() # 确保页面最终更新
+             page.update() # Ensure page is finally updated
 
     def on_db_result_select(e):
-        """当用户在数据库结果列表中选择一个 Radio 按钮时触发的回调函数"""
-        # /// MODIFIED: 添加对打印按钮的控制
-        selected_id_str = db_results_radio_group.value # 获取 RadioGroup 当前选中的 value (即记录ID字符串)
-        if selected_id_str: # 如果有选中项
+        """Callback function triggered when a user selects a Radio button in the database results list"""
+        # /// MODIFIED: Add control for the Print button
+        selected_id_str = db_results_radio_group.value # Get the currently selected value of RadioGroup (i.e., the record ID string)
+        if selected_id_str: # If an item is selected
             try:
-                selected_id_int = int(selected_id_str) # 将 ID 字符串转为整数
-                selected_db_result_id.current = selected_id_int # 更新全局状态变量
-                display_details_button.disabled = False # 启用“显示详情”按钮
-                delete_selected_button.disabled = False # 启用“删除所选”按钮
-                print_selected_button.disabled = False # /// NEW: 启用“打印”按钮
-                log_message(f"已选择数据库记录 ID: {selected_id_int}")
-            except (ValueError, TypeError): # 捕捉转换整数失败或其他类型错误
+                selected_id_int = int(selected_id_str) # Convert ID string to integer
+                selected_db_result_id.current = selected_id_int # Update global state variable
+                display_details_button.disabled = False # Enable 'Show Details' button
+                delete_selected_button.disabled = False # Enable 'Delete Selected' button
+                print_selected_button.disabled = False # /// NEW: Enable 'Print' button
+                log_message(f"Selected database record ID: {selected_id_int}") # Output: Selected database record ID: ...
+            except (ValueError, TypeError): # Catch integer conversion failure or other type errors
                 selected_db_result_id.current = None
                 display_details_button.disabled = True
                 delete_selected_button.disabled = True
-                print_selected_button.disabled = True # /// NEW: 禁用“打印”按钮
-                log_message(f"无效的选择值: '{selected_id_str}'。", is_error=True)
-        else: # 如果没有选中项 (例如，列表为空或清除了选择)
+                print_selected_button.disabled = True # /// NEW: Disable 'Print' button
+                log_message(f"Invalid selection value: '{selected_id_str}'.", is_error=True) # Output: Invalid selection value: '...'.
+        else: # If no item is selected (e.g., list is empty or selection cleared)
             selected_db_result_id.current = None
             display_details_button.disabled = True
             delete_selected_button.disabled = True
-            print_selected_button.disabled = True # /// NEW: 禁用“打印”按钮
-        # 提示用户下一步操作
-        db_result_details_view.value = "请点击“显示详情”查看所选记录。"
-        print_details_display.value = "" # /// NEW: 清空打印预览区
-        page.update() # 更新按钮状态和详情区文本
+            print_selected_button.disabled = True # /// NEW: Disable 'Print' button
+        # Prompt user for the next action
+        db_result_details_view.value = "Please click 'Show Details' to view the selected record." # Output: Please click 'Show Details' to view the selected record.
+        print_details_display.value = "" # /// NEW: Clear print preview area
+        page.update() # Update button states and details area text
 
-    # --- 绑定数据库列表的选择事件 ---
+    # --- Bind database list selection event ---
     db_results_radio_group.on_change = on_db_result_select
 
     def display_selected_details(e):
-        """当用户点击“显示详情”按钮时触发，获取并显示选中记录的详细信息"""
-        # ... (此函数不变) ...
-        if selected_db_result_id.current is None: # 检查是否已选中记录
-            log_message("未选择任何记录以显示详情。", is_error=True)
+        """Triggered when the 'Show Details' button is clicked, fetches and displays detailed information of the selected record"""
+        # ... (This function remains unchanged) ...
+        if selected_db_result_id.current is None: # Check if a record is selected
+            log_message("No record selected to show details.", is_error=True) # Output: No record selected to show details.
             return
 
         target_id = selected_db_result_id.current
-        log_message(f"正在获取 ID={target_id} 的详细信息...")
-        # 更新详情区显示加载状态
-        show_info_message(db_result_details_view, f"正在加载 ID={target_id} 的详情...")
-        page.update() # 立即显示加载提示
+        log_message(f"Fetching details for ID={target_id}...") # Output: Fetching details for ID=...
+        # Update details area to show loading status
+        show_info_message(db_result_details_view, f"Loading details for ID={target_id}...") # Output: Loading details for ID=...
+        page.update() # Immediately show loading hint
 
         try:
-            # 调用 db 模块函数获取完整详情
+            # Call db module function to get full details
             details = db.get_result_details(target_id)
-            if details: # 如果成功获取到详情
-                # --- 格式化详情信息以便显示 ---
+            if details: # If details were successfully fetched
+                # --- Format details information for display ---
                 params_str = f"{details.get('m','?')}-{details.get('n','?')}-{details.get('k','?')}-{details.get('j','?')}-{details.get('s','?')}-{details.get('run_index','?')}"
-                # 获取解析后的 Universe 和 Sets (如果解析失败，db.py 中会存入错误字符串)
+                # Get parsed Universe and Sets (if parsing failed, db.py stores an error string)
                 universe_disp = details.get('universe_parsed', 'N/A')
                 sets_list = details.get('sets_found_parsed', [])
-                num_sets = len(sets_list) if isinstance(sets_list, list) else 0 # 确保 sets_list 是列表才计算长度
+                num_sets = len(sets_list) if isinstance(sets_list, list) else 0 # Ensure sets_list is a list before calculating length
 
-                # 构建要显示的文本
+                # Build the text to display
                 details_text = (
                     f"ID: {details.get('id')}\n"
-                    f"参数 (M-N-K-J-S-RunIdx): {params_str}\n"
-                    f"时间戳: {details.get('timestamp')}\n"
-                    f"算法: {details.get('algorithm', 'N/A')}\n"
-                    f"耗时: {details.get('time_taken', 0):.2f} 秒\n" # 格式化浮点数
-                    f"覆盖条件 (c): {details.get('c_condition', 'N/A')}\n" # MODIFIED: y -> c (twice)
-                    f"Universe ({len(universe_disp) if isinstance(universe_disp, list) else 'N/A'} 个): {universe_disp}\n"
-                    f"找到的集合 ({num_sets} 组):\n"
+                    f"Parameters (M-N-K-J-S-RunIdx): {params_str}\n" # Output: Parameters (M-N-K-J-S-RunIdx): ...
+                    f"Timestamp: {details.get('timestamp')}\n" # Output: Timestamp: ...
+                    f"Algorithm: {details.get('algorithm', 'N/A')}\n" # Output: Algorithm: ...
+                    f"Time Taken: {details.get('time_taken', 0):.2f} seconds\n" # Format float # Output: Time Taken: ... seconds
+                    f"Coverage Condition (c): {details.get('c_condition', 'N/A')}\n" # MODIFIED: y -> c (twice) # Output: Coverage Condition (c): ...
+                    f"Universe ({len(universe_disp) if isinstance(universe_disp, list) else 'N/A'} items): {universe_disp}\n" # Output: Universe (... items): ...
+                    f"Found Sets ({num_sets} groups):\n" # Output: Found Sets (... groups):
                 )
 
-                # --- 格式化显示集合列表 (sets_list) ---
-                MAX_SETS_TO_DISPLAY_DB = 100 # 在详情视图中可以显示更多集合
+                # --- Format display of the sets list (sets_list) ---
+                MAX_SETS_TO_DISPLAY_DB = 100 # Can display more sets in the details view
                 if num_sets > 0 and isinstance(sets_list, list):
                     sets_to_display = sets_list[:MAX_SETS_TO_DISPLAY_DB]
                     sets_lines = []
-                    sets_per_line = 4 # 每行显示多少个集合
+                    sets_per_line = 4 # How many sets to display per line
                     for i in range(0, len(sets_to_display), sets_per_line):
-                         # 对每个集合排序后转为字符串，用 | 分隔
+                         # Sort each set, convert to string, join with |
                          line = " | ".join([str(sorted(s)) for s in sets_to_display[i:i+sets_per_line]])
-                         sets_lines.append(f"  {line}") # 加缩进
-                    details_text += "\n".join(sets_lines) # 将所有行合并
-                    if num_sets > MAX_SETS_TO_DISPLAY_DB: # 如果集合过多未完全显示
-                        details_text += f"\n  ... (还有 {num_sets - MAX_SETS_TO_DISPLAY_DB} 个未显示)"
-                elif isinstance(sets_list, str): # 如果 JSON 解析失败，sets_list 会是错误字符串
-                     details_text += f"  (无法解析集合: {sets_list})"
-                else: # 如果没有集合
-                    details_text += "  (无)"
+                         sets_lines.append(f"  {line}") # Add indentation
+                    details_text += "\n".join(sets_lines) # Combine all lines
+                    if num_sets > MAX_SETS_TO_DISPLAY_DB: # If too many sets to fully display
+                        details_text += f"\n  ... ({num_sets - MAX_SETS_TO_DISPLAY_DB} more not shown)" # Output: ... (... more not shown)
+                elif isinstance(sets_list, str): # If JSON parsing failed, sets_list will be an error string
+                     details_text += f"  (Could not parse sets: {sets_list})" # Output: (Could not parse sets: ...)
+                else: # If no sets
+                    details_text += "  (None)" # Output: (None)
 
-                # 更新详情显示区域
+                # Update the details display area
                 show_info_message(db_result_details_view, details_text)
-                log_message(f"已显示 ID={target_id} 的详情。")
-            else: # 如果 db.get_result_details 返回 None (未找到记录)
-                msg = f"未在数据库中找到 ID={target_id} 的详细信息。"
+                log_message(f"Displayed details for ID={target_id}.") # Output: Displayed details for ID=...
+            else: # If db.get_result_details returned None (record not found)
+                msg = f"Details for ID={target_id} not found in the database." # Output: Details for ID=... not found in the database.
                 log_message(msg, is_error=True)
                 show_info_message(db_result_details_view, msg, is_error=True)
-        except Exception as ex: # 捕捉获取或格式化过程中的其他错误
-            msg = f"显示详情时出错 (ID={target_id}): {ex}"
+        except Exception as ex: # Catch other errors during fetching or formatting
+            msg = f"Error displaying details (ID={target_id}): {ex}" # Output: Error displaying details (ID=...): ...
             log_message(msg, is_error=True)
-            show_info_message(db_result_details_view, f"错误: {msg}", is_error=True)
+            show_info_message(db_result_details_view, f"Error: {msg}", is_error=True) # Output: Error: ...
         finally:
-             page.update() # 确保页面最终更新
+             page.update() # Ensure page is finally updated
 
     def execute_delete(e):
-        """执行实际的删除操作 (由“删除所选”按钮直接调用)"""
-        # ... (此函数不变) ...
-        if selected_db_result_id.current is None: # 再次检查是否有选中项
-            log_message("未选择任何记录进行删除。", is_error=True)
+        """Executes the actual delete operation (called directly by the 'Delete Selected' button)"""
+        # ... (This function remains unchanged) ...
+        if selected_db_result_id.current is None: # Double check if an item is selected
+            log_message("No record selected for deletion.", is_error=True) # Output: No record selected for deletion.
             return
 
         target_id = selected_db_result_id.current
-        log_message(f"正在尝试直接删除 ID={target_id} 的记录...")
+        log_message(f"Attempting to directly delete record ID={target_id}...") # Output: Attempting to directly delete record ID=...
         try:
-            success = db.delete_result(target_id) # 调用 db 模块的删除函数
+            success = db.delete_result(target_id) # Call db module's delete function
             if success:
-                log_message(f"记录 ID={target_id} 已成功从数据库删除。正在刷新列表...")
-                # 删除成功后，重新加载数据库列表以反映更改
-                load_db_results() # load_db_results 会自动更新 UI 并清除选择
+                log_message(f"Record ID={target_id} successfully deleted from the database. Refreshing list...") # Output: Record ID=... successfully deleted from the database. Refreshing list...
+                # After successful deletion, reload the database list to reflect changes
+                load_db_results() # load_db_results will automatically update UI and clear selection
             else:
-                # 如果 db.delete_result 返回 False (可能因为未找到记录，或者sqlite错误但未抛异常)
-                # db.py 内部应该已经打印了具体原因
-                log_message(f"删除记录 ID={target_id} 的操作完成，但可能未实际删除（请检查日志）。", is_error=True)
-        except Exception as ex: # 捕捉删除过程中的异常
-            msg = f"删除记录 ID={target_id} 时发生错误: {ex}"
+                # If db.delete_result returns False (possibly because record not found, or sqlite error without exception)
+                # db.py should have logged the specific reason internally
+                log_message(f"Delete operation for record ID={target_id} completed, but it might not have been actually deleted (please check logs).", is_error=True) # Output: Delete operation for record ID=... completed, but it might not have been actually deleted (please check logs).
+        except Exception as ex: # Catch exceptions during the deletion process
+            msg = f"Error occurred while deleting record ID={target_id}: {ex}" # Output: Error occurred while deleting record ID=...: ...
             log_message(msg, is_error=True)
-            show_info_message(db_result_details_view, f"删除错误: {msg}", is_error=True) # 在详情区显示错误
+            show_info_message(db_result_details_view, f"Deletion Error: {msg}", is_error=True) # Display error in details area # Output: Deletion Error: ...
         finally:
-             page.update() # 确保 UI 更新
+             page.update() # Ensure UI is updated
 
-    # /// NEW: 格式化详情用于打印 (带序号)
+    # /// NEW: Format details for printing (with numbering)
     def format_details_for_printing(details: dict) -> str:
-        """将记录详情格式化为适合打印的字符串，集合带序号。"""
+        """Formats record details into a string suitable for printing, with numbered sets."""
         if not details:
-            return "错误：无法获取记录详情。"
+            return "Error: Could not fetch record details." # Output: Error: Could not fetch record details.
 
         try:
             params_str = f"{details.get('m', '?')}-{details.get('n', '?')}-{details.get('k', '?')}-{details.get('j', '?')}-{details.get('s', '?')}-{details.get('run_index', '?')}"
@@ -643,603 +643,603 @@ def main(page: ft.Page):
             sets_list = details.get('sets_found_parsed', [])
             num_sets = len(sets_list) if isinstance(sets_list, list) else 0
             timestamp_str = details.get('timestamp', 'N/A')
-            # 尝试更友好的时间格式
+            # Try for a more user-friendly time format
             try:
                  timestamp_dt = datetime.fromisoformat(timestamp_str)
                  timestamp_str = timestamp_dt.strftime('%Y-%m-%d %H:%M:%S')
             except (ValueError, TypeError):
-                 pass # 保留原始字符串
+                 pass # Keep the original string
 
-            # 构建基础信息
+            # Build basic information
             print_text = (
-                f"记录 ID: {details.get('id')}\n"
-                f"参数 (M-N-K-J-S-RunIdx): {params_str}\n"
-                f"保存时间: {timestamp_str}\n"
-                f"算法: {details.get('algorithm', 'N/A')}\n"
-                f"计算耗时: {details.get('time_taken', 0):.2f} 秒\n"
-                f"覆盖条件 (c): {details.get('c_condition', 'N/A')}\n"
-                f"使用的 Universe ({len(universe_disp) if isinstance(universe_disp, list) else 'N/A'} 个):\n  {universe_disp}\n"
+                f"Record ID: {details.get('id')}\n" # Output: Record ID: ...
+                f"Parameters (M-N-K-J-S-RunIdx): {params_str}\n" # Output: Parameters (M-N-K-J-S-RunIdx): ...
+                f"Saved Time: {timestamp_str}\n" # Output: Saved Time: ...
+                f"Algorithm: {details.get('algorithm', 'N/A')}\n" # Output: Algorithm: ...
+                f"Calculation Time: {details.get('time_taken', 0):.2f} seconds\n" # Output: Calculation Time: ... seconds
+                f"Coverage Condition (c): {details.get('c_condition', 'N/A')}\n" # Output: Coverage Condition (c): ...
+                f"Universe Used ({len(universe_disp) if isinstance(universe_disp, list) else 'N/A'} items):\n  {universe_disp}\n" # Output: Universe Used (... items):
                 "========================================\n"
-                f"找到的集合 ({num_sets} 组):\n"
+                f"Found Sets ({num_sets} groups):\n" # Output: Found Sets (... groups):
                 "========================================\n"
             )
 
-            # --- 添加带序号的集合列表 ---
+            # --- Add numbered list of sets ---
             if num_sets > 0 and isinstance(sets_list, list):
                 set_lines = []
                 for idx, s_item in enumerate(sets_list, start=1):
-                    # 对每个集合排序后转为字符串
+                    # Sort each set and convert to string
                     set_str = str(sorted(s_item))
-                    set_lines.append(f"{idx}. {set_str}") # 添加序号
-                print_text += "\n".join(set_lines) # 将所有带序号的行合并
-            elif isinstance(sets_list, str): # 如果 JSON 解析失败
-                print_text += f"  (无法解析集合: {sets_list})"
-            else: # 如果没有集合
-                print_text += "  (无)"
+                    set_lines.append(f"{idx}. {set_str}") # Add number
+                print_text += "\n".join(set_lines) # Combine all numbered lines
+            elif isinstance(sets_list, str): # If JSON parsing failed
+                print_text += f"  (Could not parse sets: {sets_list})" # Output: (Could not parse sets: ...)
+            else: # If no sets
+                print_text += "  (None)" # Output: (None)
 
             return print_text
 
         except Exception as e:
-            log_message(f"格式化打印文本时出错: {e}", is_error=True)
-            return f"错误：格式化记录 {details.get('id','N/A')} 的详情时出错。\n{e}"
+            log_message(f"Error formatting text for printing: {e}", is_error=True) # Output: Error formatting text for printing: ...
+            return f"Error: Error formatting details for record {details.get('id','N/A')}.\n{e}" # Output: Error: Error formatting details for record ... .
 
-    # /// NEW: 显示打印预览界面的函数
+    # /// NEW: Function to show the print preview interface
     def show_print_preview(e=None):
-        """获取选中记录详情，格式化后显示在打印预览视图中。"""
+        """Fetches selected record details, formats them, and displays in the print preview view."""
         if selected_db_result_id.current is None:
-            log_message("未选择任何记录进行打印。", is_error=True)
-            # 可以在打印预览视图显示错误，但这通常不应该发生（按钮被禁用）
-            print_details_display.value = "错误：未选择记录。"
+            log_message("No record selected for printing.", is_error=True) # Output: No record selected for printing.
+            # Could display error in print preview view, but this shouldn't normally happen (button disabled)
+            print_details_display.value = "Error: No record selected." # Output: Error: No record selected.
             print_details_display.color = ft.colors.RED
             page.update()
             return
 
         target_id = selected_db_result_id.current
-        log_message(f"准备 ID={target_id} 的打印预览...")
-        print_details_display.value = f"正在加载 ID={target_id} 的数据进行打印预览..."
-        print_details_display.color = ft.colors.BLACK # 重置颜色
-        # 强制更新以显示加载信息
+        log_message(f"Preparing print preview for ID={target_id}...") # Output: Preparing print preview for ID=...
+        print_details_display.value = f"Loading data for ID={target_id} for print preview..." # Output: Loading data for ID=... for print preview...
+        print_details_display.color = ft.colors.BLACK # Reset color
+        # Force update to show loading message
         main_computation_view.visible = False
         db_management_view.visible = False
         print_preview_view.visible = True
         page.update()
 
         try:
-            # 获取完整详情
+            # Fetch full details
             details = db.get_result_details(target_id)
             if details:
-                # 格式化详情用于打印
+                # Format details for printing
                 formatted_print_text = format_details_for_printing(details)
                 print_details_display.value = formatted_print_text
-                log_message(f"已生成 ID={target_id} 的打印预览内容。")
+                log_message(f"Generated print preview content for ID={target_id}.") # Output: Generated print preview content for ID=...
             else:
-                msg = f"错误：无法获取 ID={target_id} 的详细信息进行打印。"
+                msg = f"Error: Could not fetch details for ID={target_id} for printing." # Output: Error: Could not fetch details for ID=... for printing.
                 log_message(msg, is_error=True)
                 print_details_display.value = msg
                 print_details_display.color = ft.colors.RED
         except Exception as ex:
-            msg = f"生成打印预览时出错 (ID={target_id}): {ex}"
+            msg = f"Error generating print preview (ID={target_id}): {ex}" # Output: Error generating print preview (ID=...): ...
             log_message(msg, is_error=True)
-            print_details_display.value = f"错误: {msg}"
+            print_details_display.value = f"Error: {msg}" # Output: Error: ...
             print_details_display.color = ft.colors.RED
 
-        # 确保最终界面是更新的打印预览视图
+        # Ensure the final interface is the updated print preview view
         main_computation_view.visible = False
         db_management_view.visible = False
         print_preview_view.visible = True
         page.update()
 
-    # --- 绑定数据库管理按钮的事件 ---
-    refresh_db_button.on_click = load_db_results       # 刷新按钮 -> 加载数据
-    display_details_button.on_click = display_selected_details # 显示详情按钮 -> 显示详情
-    delete_selected_button.on_click = execute_delete     # 删除按钮 -> 直接执行删除
-    print_selected_button.on_click = show_print_preview # /// NEW: 打印按钮 -> 显示打印预览
+    # --- Bind database management button events ---
+    refresh_db_button.on_click = load_db_results       # Refresh button -> Load data
+    display_details_button.on_click = display_selected_details # Show Details button -> Display details
+    delete_selected_button.on_click = execute_delete     # Delete button -> Execute delete directly
+    print_selected_button.on_click = show_print_preview # /// NEW: Print button -> Show print preview
 
     # --- ================= ---
-    # --- 视图切换逻辑 ---
+    # --- View Switching Logic ---
     # --- ================= ---
 
-    # --- 主计算视图容器 (将原有的计算界面控件组织在一个 Column 中) ---
+    # --- Main Computation View Container (Organizes the original calculation interface controls in a Column) ---
     main_computation_view = ft.Column(
         [
-            # 参数输入标题
-            ft.Text("参数输入", size=16, weight=ft.FontWeight.BOLD),
-            # M, N, K, J, S, Timeout 输入框行
+            # Parameter input title
+            ft.Text("Parameter Input", size=16, weight=ft.FontWeight.BOLD),
+            # Row for M, N, K, J, S, Timeout input fields
             ft.Row(
                 [txt_m, txt_n, txt_k, txt_j, txt_s, txt_timeout],
                 spacing=10, alignment=ft.MainAxisAlignment.START, wrap=True
             ),
-            # 复选框行
+            # Row for checkboxes
             ft.Row(
                 [chk_manual_univ, chk_specify_c], # MODIFIED: y -> c
                 alignment=ft.MainAxisAlignment.START, spacing=20, vertical_alignment=ft.CrossAxisAlignment.CENTER
             ),
-            # 手动 Universe 输入行 (通过 Row 控制显隐)
+            # Row for manual Universe input (visibility controlled by Row)
             ft.Row([txt_manual_univ], visible=chk_manual_univ.value),
-            # 手动 c 输入行 (通过 Row 控制显隐) # MODIFIED: y -> c
+            # Row for manual c input (visibility controlled by Row) # MODIFIED: y -> c
             ft.Row([txt_specify_c], visible=chk_specify_c.value), # MODIFIED: y -> c twice
-            # 分隔线
+            # Divider line
             ft.Divider(height=10),
-            # 理论 c 和 C(j,s) 显示行 # MODIFIED: y -> c
+            # Row displaying theoretical c and C(j,s) # MODIFIED: y -> c
             ft.Row([theoretical_c_info, max_single_j_coverage], alignment=ft.MainAxisAlignment.SPACE_AROUND), # MODIFIED: y -> c
-            # 分隔线
+            # Divider line
             ft.Divider(height=10),
-            # 操作按钮行 (计算、清日志、查看数据库)
+            # Row for action buttons (Calculate, Clear Log, View Database)
             ft.Row(
-                [submit_button, progress_ring, clear_log_button, show_db_view_button], # 添加了 show_db_view_button
+                [submit_button, progress_ring, clear_log_button, show_db_view_button], # Added show_db_view_button
                 alignment=ft.MainAxisAlignment.START, spacing=15, vertical_alignment=ft.CrossAxisAlignment.CENTER
             ),
-            # 日志区域标题
-            ft.Text("运行日志", size=14, weight=ft.FontWeight.BOLD),
-            # 日志输出容器 (固定高度)
+            # Log area title
+            ft.Text("Run Log", size=14, weight=ft.FontWeight.BOLD),
+            # Log output container (fixed height)
             ft.Container(
                 content=log_output,
                 border=ft.border.all(1, ft.colors.BLACK12),
                 border_radius=ft.border_radius.all(5),
                 padding=5,
-                expand=False # 日志区域不自动扩展填充空间
+                expand=False # Log area does not automatically expand to fill space
             ),
-             # 计算结果区域标题
-            ft.Text("计算结果", size=14, weight=ft.FontWeight.BOLD),
-             # 计算结果显示容器 (允许扩展)
+             # Calculation results area title
+            ft.Text("Calculation Results", size=14, weight=ft.FontWeight.BOLD),
+             # Calculation results display container (allows expansion)
             ft.Container(
                 content=sample_result_info,
                 border=ft.border.all(1, ft.colors.BLACK26),
                 border_radius=ft.border_radius.all(5),
                 padding=10,
                 margin=ft.margin.only(top=10),
-                expand=True # 结果区域可以扩展填充剩余的垂直空间
+                expand=True # Result area can expand to fill remaining vertical space
             )
         ],
-        visible=True, # 主计算视图默认可见
-        expand=True   # 允许此视图在垂直方向上扩展
+        visible=True, # Main computation view is visible by default
+        expand=True   # Allow this view to expand vertically
     )
 
-    # /// MODIFIED: 更新视图切换逻辑以包含打印视图
+    # /// MODIFIED: Update view switching logic to include print view
     def switch_view(view_name: str):
-        """切换可见视图: 'main', 'db', 'print'"""
+        """Switches the visible view: 'main', 'db', 'print'"""
         main_computation_view.visible = (view_name == 'main')
         db_management_view.visible = (view_name == 'db')
         print_preview_view.visible = (view_name == 'print')
 
         if view_name == 'db':
-            # 切换到数据库视图时，如果之前不在打印预览，则刷新列表
-            # (如果刚从打印预览返回，则列表内容不变，无需刷新)
-            if not print_preview_view.visible: # 简单判断，可能需要更精确的状态
+            # When switching to database view, refresh the list if not coming from print preview
+            # (If just returned from print preview, list content remains the same, no need to refresh)
+            if not print_preview_view.visible: # Simple check, may need more precise state
                 load_db_results()
-            log_message("已切换到数据库结果管理视图。")
+            log_message("Switched to Database Results Management view.") # Output: Switched to Database Results Management view.
         elif view_name == 'main':
-            log_message("已返回到主计算界面。")
+            log_message("Returned to the main Calculation interface.") # Output: Returned to the main Calculation interface.
         elif view_name == 'print':
-            # show_print_preview 函数负责加载内容和记录日志
-             pass # 日志记录在 show_print_preview 中完成
+            # show_print_preview function handles content loading and logging
+             pass # Logging done in show_print_preview
 
         page.update()
 
-    # --- 绑定视图切换按钮的事件 ---
-    # 点击“查看/管理数据库结果”按钮
+    # --- Bind view switching button events ---
+    # Click 'View/Manage Database Results' button
     show_db_view_button.on_click = lambda e: switch_view('db')
-    # 点击数据库视图中的“返回计算界面”按钮
+    # Click 'Back to Calculation Interface' button in database view
     back_to_main_button.on_click = lambda e: switch_view('main')
-    # /// NEW: 点击打印预览中的“返回数据库列表”按钮
+    # /// NEW: Click 'Back to Database List' button in print preview
     print_back_button.on_click = lambda e: switch_view('db')
 
     # --- ========================== ---
-    # --- 提交计算的核心逻辑函数 ---
+    # --- Core Logic Function for Submitting Calculation ---
     # --- ========================== ---
-    # ... (on_submit 和 run_computation 函数保持不变) ...
+    # ... (on_submit and run_computation functions remain unchanged) ...
     def on_submit(e):
-        """处理提交按钮点击事件：验证输入，获取 run_index, 启动后台计算线程。"""
-        log_message("收到计算请求...")
-        show_info_message(sample_result_info, "正在处理输入参数...")
+        """Handles the submit button click event: validates input, gets run_index, starts background calculation thread."""
+        log_message("Calculation request received...") # Output: Calculation request received...
+        show_info_message(sample_result_info, "Processing input parameters...") # Output: Processing input parameters...
 
-        # --- 1. 清除旧错误提示 ---
+        # --- 1. Clear old error hints ---
         for field in [txt_m, txt_n, txt_k, txt_j, txt_s, txt_timeout, txt_manual_univ, txt_specify_c]: # MODIFIED: y -> c
             field.error_text = None
             field.update()
 
-        error_occurred = False # 标记是否发生错误
+        error_occurred = False # Flag to track if an error occurred
 
-        # --- 2. 获取并验证基本参数 M, N, K, J, S, Timeout ---
+        # --- 2. Get and validate basic parameters M, N, K, J, S, Timeout ---
         m_processed = validate_and_get_int(txt_m, "M", 1)
         n_processed = validate_and_get_int(txt_n, "N", 1)
         k_processed = validate_and_get_int(txt_k, "K", 1)
         j_processed = validate_and_get_int(txt_j, "J", 1)
-        s_processed = validate_and_get_int(txt_s, "S", 0) # S可以为0
-        timeout_val = validate_and_get_int(txt_timeout, "超时时间", 1)
+        s_processed = validate_and_get_int(txt_s, "S", 0) # S can be 0
+        timeout_val = validate_and_get_int(txt_timeout, "Timeout", 1) # Changed name for translation consistency
 
         if None in [m_processed, n_processed, k_processed, j_processed, s_processed, timeout_val]:
-            log_message("基本参数验证失败。", is_error=True)
+            log_message("Basic parameter validation failed.", is_error=True) # Output: Basic parameter validation failed.
             error_occurred = True
 
-        if error_occurred: return # 如果基本参数验证失败，则停止
+        if error_occurred: return # Stop if basic parameter validation failed
 
         timeout_seconds = timeout_val
 
-        # --- 3. 进一步检查参数间的逻辑关系 ---
+        # --- 3. Further check logical relationships between parameters ---
         validation_errors = []
-        if n_processed > m_processed: validation_errors.append(f"N ({n_processed}) 不能大于 M ({m_processed})。")
-        if k_processed > n_processed: validation_errors.append(f"K ({k_processed}) 不能大于 N ({n_processed})。")
-        if j_processed > n_processed: validation_errors.append(f"J ({j_processed}) 不能大于 N ({n_processed})。")
-        if s_processed > k_processed: validation_errors.append(f"S ({s_processed}) 不能大于 K ({k_processed})。")
-        if s_processed > j_processed: validation_errors.append(f"S ({s_processed}) 不能大于 J ({j_processed})。")
-        if s_processed < 0: validation_errors.append("S 不能小于 0。")
+        if n_processed > m_processed: validation_errors.append(f"N ({n_processed}) cannot be greater than M ({m_processed}).")
+        if k_processed > n_processed: validation_errors.append(f"K ({k_processed}) cannot be greater than N ({n_processed}).")
+        if j_processed > n_processed: validation_errors.append(f"J ({j_processed}) cannot be greater than N ({n_processed}).")
+        if s_processed > k_processed: validation_errors.append(f"S ({s_processed}) cannot be greater than K ({k_processed}).")
+        if s_processed > j_processed: validation_errors.append(f"S ({s_processed}) cannot be greater than J ({j_processed}).")
+        if s_processed < 0: validation_errors.append("S cannot be less than 0.")
 
-        if validation_errors: # 如果存在逻辑错误
+        if validation_errors: # If logical errors exist
             error_msg = "\n".join(validation_errors)
-            log_message(f"参数逻辑错误: {error_msg}", is_error=True)
-            show_info_message(sample_result_info, f"错误:\n{error_msg}", is_error=True)
-            return # 停止执行
+            log_message(f"Parameter logic error: {error_msg}", is_error=True) # Output: Parameter logic error: ...
+            show_info_message(sample_result_info, f"Error:\n{error_msg}", is_error=True) # Output: Error:\n...
+            return # Stop execution
 
-        # --- 4. 处理 Universe (根据复选框状态) ---
-        is_manual_univ = chk_manual_univ.value # 获取复选框状态
-        log_message(f"手动 Universe 选项: {'已勾选' if is_manual_univ else '未勾选'}")
-        univ = [] # 初始化 Universe 列表
-        if is_manual_univ: # 如果勾选了手动输入
-            manual_str = txt_manual_univ.value.strip() # 获取手动输入值
-            txt_manual_univ.error_text = None # 清除旧错误
-            if not manual_str: # 输入为空
-                msg = "错误：勾选了手动输入 Universe，但输入框为空。"
+        # --- 4. Handle Universe (based on checkbox state) ---
+        is_manual_univ = chk_manual_univ.value # Get checkbox state
+        log_message(f"Manual Universe option: {'Checked' if is_manual_univ else 'Unchecked'}") # Output: Manual Universe option: Checked/Unchecked
+        univ = [] # Initialize Universe list
+        if is_manual_univ: # If manual input is checked
+            manual_str = txt_manual_univ.value.strip() # Get manually entered value
+            txt_manual_univ.error_text = None # Clear old error
+            if not manual_str: # Input is empty
+                msg = "Error: Manual Universe input checked, but the input field is empty." # Output: Error: Manual Universe input checked, but the input field is empty.
                 log_message(msg, is_error=True)
                 show_info_message(sample_result_info, msg, is_error=True)
-                txt_manual_univ.error_text = "输入不能为空"
+                txt_manual_univ.error_text = "Input cannot be empty" # Output: Input cannot be empty
                 txt_manual_univ.update()
                 error_occurred = True
-            else: # 输入不为空，尝试解析
+            else: # Input is not empty, try parsing
                 try:
-                    num_strs = manual_str.split() # 按空格分割
+                    num_strs = manual_str.split() # Split by spaces
                     univ_nums_temp = []
-                    for num_str in num_strs: # 逐个转换
+                    for num_str in num_strs: # Convert one by one
                         try: univ_nums_temp.append(int(num_str))
-                        except ValueError: raise ValueError(f"输入 '{num_str}' 不是有效整数。")
+                        except ValueError: raise ValueError(f"Input '{num_str}' is not a valid integer.")
 
-                    # 检查数量、重复、范围
-                    if len(univ_nums_temp) != n_processed: raise ValueError(f"需输入 {n_processed} 个数字，实际输入 {len(univ_nums_temp)} 个。")
-                    if len(set(univ_nums_temp)) != len(univ_nums_temp): raise ValueError("输入数字包含重复项。")
+                    # Check quantity, duplicates, range
+                    if len(univ_nums_temp) != n_processed: raise ValueError(f"Expected {n_processed} numbers, but got {len(univ_nums_temp)}.")
+                    if len(set(univ_nums_temp)) != len(univ_nums_temp): raise ValueError("Input numbers contain duplicates.")
                     invalid_nums = [x for x in univ_nums_temp if not (1 <= x <= m_processed)]
-                    if invalid_nums: raise ValueError(f"数字需在 1 到 {m_processed} 之间。无效: {invalid_nums}")
+                    if invalid_nums: raise ValueError(f"Numbers must be between 1 and {m_processed}. Invalid: {invalid_nums}")
 
-                    univ = sorted(univ_nums_temp) # 排序后存入 univ
-                    log_message(f"使用手动输入的 Universe: {univ}")
-                    txt_manual_univ.update() # 更新以清除可能的旧错误提示
-                except ValueError as ve: # 捕捉解析或验证过程中的错误
-                    log_message(f"手动 Universe 输入错误: {ve}", is_error=True)
-                    show_info_message(sample_result_info, f"手动 Universe 输入错误: {ve}", is_error=True)
-                    txt_manual_univ.error_text = str(ve) # 在文本框旁边显示错误
+                    univ = sorted(univ_nums_temp) # Sort and store in univ
+                    log_message(f"Using manually entered Universe: {univ}") # Output: Using manually entered Universe: [...]
+                    txt_manual_univ.update() # Update to clear possible old error hints
+                except ValueError as ve: # Catch errors during parsing or validation
+                    log_message(f"Manual Universe input error: {ve}", is_error=True) # Output: Manual Universe input error: ...
+                    show_info_message(sample_result_info, f"Manual Universe input error: {ve}", is_error=True) # Output: Manual Universe input error: ...
+                    txt_manual_univ.error_text = str(ve) # Display error next to the text field
                     txt_manual_univ.update()
                     error_occurred = True
-        else: # 如果未勾选手动输入，则随机生成
+        else: # If manual input is not checked, generate randomly
             try:
-                univ = sorted(random.sample(range(1, m_processed + 1), n_processed)) # 随机采样
-                log_message(f"随机生成的 Universe: {univ}")
-            except ValueError as e: # 捕捉 M < N 等导致的采样错误
-                 msg = f"无法生成随机 Universe (M={m_processed}, N={n_processed}): {e}"
+                univ = sorted(random.sample(range(1, m_processed + 1), n_processed)) # Random sampling
+                log_message(f"Randomly generated Universe: {univ}") # Output: Randomly generated Universe: [...]
+            except ValueError as e: # Catch sampling errors due to M < N, etc.
+                 msg = f"Cannot generate random Universe (M={m_processed}, N={n_processed}): {e}" # Output: Cannot generate random Universe (M=..., N=...): ...
                  log_message(msg, is_error=True)
                  show_info_message(sample_result_info, msg, is_error=True)
                  error_occurred = True
 
-        if error_occurred: return # 如果处理 Universe 出错，则停止
+        if error_occurred: return # Stop if Universe handling failed
 
-        # --- 5. 处理覆盖条件 c (根据复选框状态) --- # MODIFIED: y -> c
-        is_manual_c = chk_specify_c.value # 获取复选框状态 # MODIFIED: y -> c
-        log_message(f"手动 C 选项: {'已勾选' if is_manual_c else '未勾选'}") # MODIFIED: Y -> C, is_manual_y -> is_manual_c
-        condition_processed = None # 最终使用的 c 值 # MODIFIED: y -> c
-        max_c_single_j = -1 # 存储 C(j,s) 的计算结果 # MODIFIED: y -> c
-        try: # 计算 C(j,s)
+        # --- 5. Handle coverage condition c (based on checkbox state) --- # MODIFIED: y -> c
+        is_manual_c = chk_specify_c.value # Get checkbox state # MODIFIED: y -> c
+        log_message(f"Manual C option: {'Checked' if is_manual_c else 'Unchecked'}") # MODIFIED: Y -> C, is_manual_y -> is_manual_c # Output: Manual C option: Checked/Unchecked
+        condition_processed = None # Final c value to use # MODIFIED: y -> c
+        max_c_single_j = -1 # Store the result of C(j,s) calculation # MODIFIED: y -> c
+        try: # Calculate C(j,s)
             if j_processed >= s_processed >= 0: max_c_single_j = comb(j_processed, s_processed) # MODIFIED: y -> c
             else: max_c_single_j = 0 # MODIFIED: y -> c
-        except ValueError: # 理论上之前的验证应该阻止了这个错误，但还是加上
-             msg = f"错误: 计算 C(j={j_processed}, s={s_processed}) 时参数无效。"
+        except ValueError: # Theoretically, previous validation should prevent this error, but add check just in case
+             msg = f"Error: Invalid parameters when calculating C(j={j_processed}, s={s_processed})." # Output: Error: Invalid parameters when calculating C(j=..., s=...).
              log_message(msg, is_error=True)
              show_info_message(sample_result_info, msg, is_error=True)
              error_occurred = True
 
-        if not error_occurred: # 如果计算 C(j,s) 未出错
-            if is_manual_c: # 如果勾选了手动指定 c # MODIFIED: y -> c
-                c_str = txt_specify_c.value.strip() # 获取输入值 # MODIFIED: y -> c twice
-                txt_specify_c.error_text = None # 清除旧错误 # MODIFIED: y -> c
-                if not c_str: # 输入为空 # MODIFIED: y -> c (variable name only)
-                    msg = "错误：勾选了手动指定 c，但输入框为空。" # MODIFIED: y -> c
+        if not error_occurred: # If calculating C(j,s) didn't cause an error
+            if is_manual_c: # If manually specifying c is checked # MODIFIED: y -> c
+                c_str = txt_specify_c.value.strip() # Get input value # MODIFIED: y -> c twice
+                txt_specify_c.error_text = None # Clear old error # MODIFIED: y -> c
+                if not c_str: # Input is empty # MODIFIED: y -> c (variable name only)
+                    msg = "Error: Specify c manually checked, but the input field is empty." # MODIFIED: y -> c # Output: Error: Specify c manually checked, but the input field is empty.
                     log_message(msg, is_error=True)
                     show_info_message(sample_result_info, msg, is_error=True)
-                    txt_specify_c.error_text = "输入不能为空" # MODIFIED: y -> c
+                    txt_specify_c.error_text = "Input cannot be empty" # MODIFIED: y -> c # Output: Input cannot be empty
                     txt_specify_c.update() # MODIFIED: y -> c
                     error_occurred = True
-                else: # 输入不为空，尝试解析和验证
+                else: # Input is not empty, try parsing and validating
                     try:
-                        specified_c = int(c_str) # 转为整数 # MODIFIED: y -> c twice
-                        # 验证 c 的范围 # MODIFIED: y -> c
-                        if specified_c < 1: raise ValueError("c 值必须至少为 1。") # MODIFIED: y -> c twice
-                        # 检查 c 是否超过 C(j,s) # MODIFIED: y -> c
-                        # 注意：max_c_single_j 可能为 0 (例如 j<s)，此时任何正数 c 都是无效的 # MODIFIED: y -> c twice
+                        specified_c = int(c_str) # Convert to integer # MODIFIED: y -> c twice
+                        # Validate c's range # MODIFIED: y -> c
+                        if specified_c < 1: raise ValueError("c value must be at least 1.") # MODIFIED: y -> c twice
+                        # Check if c exceeds C(j,s) # MODIFIED: y -> c
+                        # Note: max_c_single_j might be 0 (e.g., j<s), in which case any positive c is invalid # MODIFIED: y -> c twice
                         if max_c_single_j >= 0 and specified_c > max_c_single_j: # MODIFIED: y -> c twice
-                            raise ValueError(f"c ({specified_c}) 不能超过 C({j_processed},{s_processed})={max_c_single_j}。") # MODIFIED: y -> c 3 times
+                            raise ValueError(f"c ({specified_c}) cannot exceed C({j_processed},{s_processed})={max_c_single_j}.") # MODIFIED: y -> c 3 times
                         elif max_c_single_j == 0 and specified_c > 0: # MODIFIED: y -> c twice
-                             raise ValueError(f"C(j,s) 为 0，无法指定正数 c ({specified_c})。") # MODIFIED: y -> c twice
+                             raise ValueError(f"C(j,s) is 0, cannot specify a positive c ({specified_c}).") # MODIFIED: y -> c twice
 
-                        condition_processed = specified_c # 验证通过，使用用户指定的值 # MODIFIED: y -> c
-                        log_message(f"使用手动指定的覆盖条件 c = {condition_processed}") # MODIFIED: y -> c
-                        txt_specify_c.update() # 更新以清除可能的旧错误提示 # MODIFIED: y -> c
-                    except ValueError as ve: # 捕捉转换或范围验证错误
-                        log_message(f"手动 c 值输入错误: {ve}", is_error=True) # MODIFIED: y -> c
-                        show_info_message(sample_result_info, f"手动 c 值输入错误: {ve}", is_error=True) # MODIFIED: y -> c
+                        condition_processed = specified_c # Validation passed, use user-specified value # MODIFIED: y -> c
+                        log_message(f"Using manually specified coverage condition c = {condition_processed}") # MODIFIED: y -> c # Output: Using manually specified coverage condition c = ...
+                        txt_specify_c.update() # Update to clear possible old error hints # MODIFIED: y -> c
+                    except ValueError as ve: # Catch conversion or range validation errors
+                        log_message(f"Manual c value input error: {ve}", is_error=True) # MODIFIED: y -> c # Output: Manual c value input error: ...
+                        show_info_message(sample_result_info, f"Manual c value input error: {ve}", is_error=True) # MODIFIED: y -> c # Output: Manual c value input error: ...
                         txt_specify_c.error_text = str(ve) # MODIFIED: y -> c
                         txt_specify_c.update() # MODIFIED: y -> c
                         error_occurred = True
-            else: # 如果未勾选手动指定 c，则自动使用 C(j,s) # MODIFIED: y -> c
+            else: # If manually specifying c is not checked, automatically use C(j,s) # MODIFIED: y -> c
                  condition_processed = max_c_single_j # MODIFIED: y -> c
-                 log_message(f"使用自动计算的覆盖条件 c = C(j,s) = {condition_processed}") # MODIFIED: y -> c
-                 # 后端算法应该能处理 c=0 的情况 (表示没有覆盖要求) # MODIFIED: y -> c
+                 log_message(f"Using automatically calculated coverage condition c = C(j,s) = {condition_processed}") # MODIFIED: y -> c # Output: Using automatically calculated coverage condition c = C(j,s) = ...
+                 # Backend algorithm should handle c=0 (meaning no coverage requirement) # MODIFIED: y -> c
                  if condition_processed <= 0:
-                      log_message(f"警告：计算得到的 c = {condition_processed}。后端将按此执行。") # MODIFIED: y -> c
+                      log_message(f"Warning: Calculated c = {condition_processed}. Backend will proceed accordingly.") # MODIFIED: y -> c # Output: Warning: Calculated c = .... Backend will proceed accordingly.
 
-        if error_occurred: return # 如果处理 c 出错，则停止 # MODIFIED: y -> c
+        if error_occurred: return # Stop if c handling failed # MODIFIED: y -> c
 
-        # --- 所有输入参数处理和验证完毕 ---
-        log_message(f"最终参数: M={m_processed}, N={n_processed}, K={k_processed}, J={j_processed}, S={s_processed}, 使用c={condition_processed}, Timeout={timeout_seconds}s") # MODIFIED: y -> c
-        show_info_message(sample_result_info, f"参数验证通过。\nUniverse: {univ}\nc={condition_processed}\n正在准备启动计算 (超时: {timeout_seconds} 秒)...") # MODIFIED: y -> c
+        # --- All input parameters processed and validated ---
+        log_message(f"Final parameters: M={m_processed}, N={n_processed}, K={k_processed}, J={j_processed}, S={s_processed}, Using c={condition_processed}, Timeout={timeout_seconds}s") # MODIFIED: y -> c # Output: Final parameters: M=..., N=..., K=..., J=..., S=..., Using c=..., Timeout=...s
+        show_info_message(sample_result_info, f"Parameter validation passed.\nUniverse: {univ}\nc={condition_processed}\nPreparing to start calculation (Timeout: {timeout_seconds} seconds)...") # MODIFIED: y -> c # Output: Parameter validation passed.\nUniverse: [...]\nc=...\nPreparing to start calculation (Timeout: ... seconds)...
 
-        # --- 6. 获取持久化的运行索引 (x) ---
-        log_message("正在从数据库获取下一个运行索引...")
+        # --- 6. Get persistent run index (x) ---
+        log_message("Fetching next run index from the database...") # Output: Fetching next run index from the database...
         current_run_idx = db.get_and_increment_run_index(m_processed, n_processed, k_processed, j_processed, s_processed)
 
-        if current_run_idx is None: # 如果获取索引失败
-            msg = "错误：无法从数据库获取或更新运行索引！计算取消。"
+        if current_run_idx is None: # If getting index failed
+            msg = "Error: Could not get or update run index from the database! Calculation cancelled." # Output: Error: Could not get or update run index from the database! Calculation cancelled.
             log_message(msg, is_error=True)
             show_info_message(sample_result_info, msg, is_error=True)
-            return # 停止执行
+            return # Stop execution
 
-        log_message(f"本次运行索引: {current_run_idx}")
+        log_message(f"Run index for this execution: {current_run_idx}") # Output: Run index for this execution: ...
 
-        # --- 7. **禁用 UI**，准备执行耗时操作 ---
+        # --- 7. **Disable UI**, prepare for time-consuming operation ---
         set_busy(True)
 
-        # --- 8. 创建 Sample 实例并准备运行计算 ---
+        # --- 8. Create Sample instance and prepare to run calculation ---
         sample = None
         try:
-            # 创建 Sample 实例，传入所有参数
+            # Create Sample instance, passing all parameters
             sample = Sample(m=m_processed, n=n_processed, k=k_processed, j=j_processed, s=s_processed,
-                            c=condition_processed,    # 传递最终处理好的 c 值 # MODIFIED: y -> c twice
-                            run_idx=current_run_idx,  # 传递从数据库获取的 run_index
+                            c=condition_processed,    # Pass the final processed c value # MODIFIED: y -> c twice
+                            run_idx=current_run_idx,  # Pass the run_index obtained from the database
                             timeout=timeout_seconds,
-                            rand_instance=random)     # 传递当前的随机数生成器实例
-            sample.univ = univ # 将前面准备好的 Universe 设置给实例
-            log_message(f"Sample 实例 (Run {current_run_idx}) 创建成功，即将启动后台计算...")
+                            rand_instance=random)     # Pass the current random number generator instance
+            sample.univ = univ # Set the previously prepared Universe to the instance
+            log_message(f"Sample instance (Run {current_run_idx}) created successfully, starting background calculation...") # Output: Sample instance (Run ...) created successfully, starting background calculation...
 
-            # --- 9. 启动后台计算线程 ---
-            # 将耗时的 sample.run() 方法放在一个单独的线程中执行
+            # --- 9. Start background calculation thread ---
+            # Run the time-consuming sample.run() method in a separate thread
             computation_thread = threading.Thread(
-                target=run_computation,   # 线程执行的目标函数
-                args=(sample,),           # 传递 Sample 实例给目标函数
-                daemon=True               # 设置为守护线程，主程序退出时该线程也会退出
+                target=run_computation,   # Target function for the thread to execute
+                args=(sample,),           # Pass the Sample instance to the target function
+                daemon=True               # Set as daemon thread, so it exits when the main program exits
             )
-            computation_thread.start() # 启动线程
-            # UI 保持禁用状态，计算完成后 run_computation 函数会调用 set_busy(False) 来恢复 UI
+            computation_thread.start() # Start the thread
+            # UI remains disabled; run_computation function will call set_busy(False) to re-enable UI upon completion
 
-        except ValueError as e: # 捕捉 Sample 初始化时可能抛出的参数错误
-            msg = f"创建计算实例时参数错误 (Run {current_run_idx}): {e}"
+        except ValueError as e: # Catch parameter errors potentially thrown during Sample initialization
+            msg = f"Parameter error when creating calculation instance (Run {current_run_idx}): {e}" # Output: Parameter error when creating calculation instance (Run ...): ...
             log_message(msg, is_error=True)
             show_info_message(sample_result_info, msg, is_error=True)
-            set_busy(False) # 出错，恢复 UI
-        except Exception as e: # 捕捉其他意外错误
-            msg = f"启动计算过程中发生意外错误 (Run {current_run_idx}): {e}"
+            set_busy(False) # Error occurred, re-enable UI
+        except Exception as e: # Catch other unexpected errors
+            msg = f"Unexpected error during calculation startup (Run {current_run_idx}): {e}" # Output: Unexpected error during calculation startup (Run ...): ...
             log_message(msg, is_error=True)
-            show_info_message(sample_result_info, f"运行时错误: {e}", is_error=True)
-            set_busy(False) # 出错，恢复 UI
-            print(f"--- 创建或启动 Sample 实例时发生未捕获的错误 (Run {current_run_idx}) ---")
+            show_info_message(sample_result_info, f"Runtime error: {e}", is_error=True) # Output: Runtime error: ...
+            set_busy(False) # Error occurred, re-enable UI
+            print(f"--- Uncaught error during Sample instance creation or startup (Run {current_run_idx}) ---")
             import traceback
-            traceback.print_exc() # 打印详细错误堆栈到控制台
-            print(f"--- 错误结束 ---")
+            traceback.print_exc() # Print detailed error stack to console
+            print(f"--- Error end ---")
 
-    # --- 用于在后台线程中运行计算并更新 UI 的函数 ---
+    # --- Function to run calculation in a background thread and update UI ---
     def run_computation(sample_instance: Sample):
-        """在单独的线程中运行 Sample.run()，处理结果，更新 UI，并在结束时恢复 UI 状态。"""
-        result_text = f"计算中 (Run {sample_instance.run_idx})..." # 初始结果文本
-        is_final_error = False # 标记最终结果是否表示错误状态
-        run_idx_local = getattr(sample_instance, 'run_idx', 'N/A') # 获取 run_index 以便在日志中使用
+        """Runs Sample.run() in a separate thread, processes results, updates UI, and restores UI state upon completion."""
+        result_text = f"Calculating (Run {sample_instance.run_idx})..." # Initial result text
+        is_final_error = False # Flag if the final result indicates an error state
+        run_idx_local = getattr(sample_instance, 'run_idx', 'N/A') # Get run_index for use in logs
 
         try:
-            # --- 执行核心计算 ---
-            log_message(f"后台线程开始执行计算 (Run {run_idx_local})...")
-            sample_instance.run() # 调用 Sample 对象的 run 方法，这会阻塞当前线程直到计算完成或超时
-            log_message(f"后台计算执行完毕 (Run {run_idx_local})。")
+            # --- Execute core calculation ---
+            log_message(f"Background thread started executing calculation (Run {run_idx_local})...") # Output: Background thread started executing calculation (Run ...)...
+            sample_instance.run() # Call the Sample object's run method, which blocks the current thread until completion or timeout
+            log_message(f"Background calculation finished (Run {run_idx_local}).") # Output: Background calculation finished (Run ...).
 
-            # --- 处理计算结果 ---
-            log_message(f"处理计算结果 (Run {run_idx_local}). 结果标识符: {sample_instance.ans}")
+            # --- Process calculation results ---
+            log_message(f"Processing calculation results (Run {run_idx_local}). Result identifier: {sample_instance.ans}") # Output: Processing calculation results (Run ...). Result identifier: ...
 
-            # 检查 backend 返回的结果是否有效
+            # Check if the result returned by backend is valid
             if sample_instance.result and 'alg' in sample_instance.result:
-                # 从结果字典中提取信息
+                # Extract information from the result dictionary
                 alg = sample_instance.result.get('alg', 'N/A')
                 sets_list = sample_instance.sets if isinstance(sample_instance.sets, list) else []
                 num_sets = len(sets_list)
                 time_taken = sample_instance.result.get('time', 0)
                 status = sample_instance.result.get('status', 'Unknown')
-                final_run_idx = sample_instance.result.get('run_index', run_idx_local) # 确认 run_index
-                c_used = sample_instance.result.get('coverage_target', sample_instance.c) # 获取实际使用的 c # MODIFIED: y -> c twice
+                final_run_idx = sample_instance.result.get('run_index', run_idx_local) # Confirm run_index
+                c_used = sample_instance.result.get('coverage_target', sample_instance.c) # Get the actually used c # MODIFIED: y -> c twice
 
-                log_message(f"求解算法 (Run {final_run_idx}): {alg}, 状态: {status}, 耗时: {time_taken:.2f}s, 找到集合数: {num_sets}")
+                log_message(f"Solver Algorithm (Run {final_run_idx}): {alg}, Status: {status}, Time: {time_taken:.2f}s, Sets found: {num_sets}") # Output: Solver Algorithm (Run ...): ..., Status: ..., Time: ...s, Sets found: ...
 
-                # --- 构建要在主结果区显示的文本 ---
+                # --- Build text to display in the main result area ---
                 result_text = (
-                    f"结果标识: {str(sample_instance.ans)}\n"
+                    f"Result ID: {str(sample_instance.ans)}\n"
                     f"Run Index: {final_run_idx}\n"
-                    f"Universe ({len(sample_instance.univ)}个): {sample_instance.univ}\n"
-                    f"算法: {alg}\n"
-                    f"状态: {status}\n"
-                    f"使用c: {c_used}\n" # MODIFIED: y -> c twice
-                    f"耗时: {time_taken:.2f} 秒\n"
-                    f"找到集合 ({num_sets} 个):\n"
+                    f"Universe ({len(sample_instance.univ)} items): {sample_instance.univ}\n"
+                    f"Algorithm: {alg}\n"
+                    f"Status: {status}\n"
+                    f"Using c: {c_used}\n" # MODIFIED: y -> c twice
+                    f"Time Taken: {time_taken:.2f} seconds\n"
+                    f"Found Sets ({num_sets} groups):\n"
                 )
-                # 根据状态判断是否是错误/失败状态
+                # Determine if status indicates an error/failure state
                 is_final_error = status not in ('OPTIMAL', 'FEASIBLE', 'SUCCESS', 'INFEASIBLE')
 
-                # --- 格式化显示找到的集合列表 ---
-                MAX_SETS_TO_DISPLAY = 50 # 主结果区最多显示多少个集合
+                # --- Format display of found sets list ---
+                MAX_SETS_TO_DISPLAY = 50 # Max number of sets to display in the main result area
                 if num_sets > 0 :
                     sets_to_display = sets_list[:MAX_SETS_TO_DISPLAY]
                     sets_lines = []
-                    sets_per_line = 3 # 每行显示多少个集合
+                    sets_per_line = 3 # How many sets to display per line
                     for i in range(0, len(sets_to_display), sets_per_line):
                          line = " | ".join([str(sorted(s)) for s in sets_to_display[i:i+sets_per_line]])
-                         sets_lines.append(f"  {line}") # 加缩进
+                         sets_lines.append(f"  {line}") # Add indentation
                     result_text += "\n".join(sets_lines)
-                    if num_sets > MAX_SETS_TO_DISPLAY: # 如果集合过多
-                        result_text += f"\n  ... (还有 {num_sets - MAX_SETS_TO_DISPLAY} 个未显示)"
-                elif status == 'INFEASIBLE': # 如果状态是无解
-                     result_text += "  (问题被证明无解)"
-                else: # 其他情况 (包括成功但0集合，或错误状态)
-                     result_text += "  (无)"
+                    if num_sets > MAX_SETS_TO_DISPLAY: # If too many sets
+                        result_text += f"\n  ... ({num_sets - MAX_SETS_TO_DISPLAY} more not shown)" # Output: ... (... more not shown)
+                elif status == 'INFEASIBLE': # If status is infeasible
+                     result_text += "  (Problem proven infeasible)" # Output: (Problem proven infeasible)
+                else: # Other cases (including success with 0 sets, or error states)
+                     result_text += "  (None)" # Output: (None)
 
-                # --- 数据库存储 (仅当 K=6 时) ---
+                # --- Database Storage (only if K=6) ---
                 if sample_instance.k == 6:
-                    log_message(f"K=6 (Run {final_run_idx})，尝试保存结果到数据库...")
+                    log_message(f"K=6 (Run {final_run_idx}), attempting to save results to the database...") # Output: K=6 (Run ...), attempting to save results to the database...
                     try:
-                        # 将 Universe 和 Sets 列表转换为 JSON 字符串以便存储
+                        # Convert Universe and Sets list to JSON strings for storage
                         universe_str = json.dumps(sample_instance.univ)
                         found_sets_str = json.dumps(sets_list)
 
-                        # 准备要存入数据库的数据字典
+                        # Prepare data dictionary to store in the database
                         result_data = {
                             'm': sample_instance.m, 'n': sample_instance.n, 'k': sample_instance.k,
                             'j': sample_instance.j, 's': sample_instance.s, 'run_index': final_run_idx,
                             'num_results': num_sets, 'c_condition': c_used, 'algorithm': alg, # MODIFIED: y -> c twice
                             'time_taken': time_taken, 'universe': universe_str, 'sets_found': found_sets_str
-                            # timestamp 会由数据库自动添加
+                            # timestamp will be added automatically by the database
                         }
-                        # 调用 db 模块的保存函数
+                        # Call db module's save function
                         save_success = db.save_result(result_data)
                         if save_success:
-                            log_message(f"结果 (Run {final_run_idx}) 已成功保存到数据库。")
+                            log_message(f"Results (Run {final_run_idx}) successfully saved to the database.") # Output: Results (Run ...) successfully saved to the database.
                         else:
-                            # save_result 内部会打印错误，这里只记录一个通用日志
-                            log_message(f"保存结果 (Run {final_run_idx}) 到数据库时遇到问题（可能重复或错误，请检查日志）。", is_error=True)
-                            is_final_error = True # 标记为错误状态
-                    except Exception as db_err: # 捕捉保存过程中的其他异常
-                        error_msg = f"错误：保存结果 (Run {final_run_idx}) 到数据库失败: {db_err}"
+                            # save_result logs errors internally, just log a general message here
+                            log_message(f"Problem encountered while saving results (Run {final_run_idx}) to the database (possibly duplicate or error, please check logs).", is_error=True) # Output: Problem encountered while saving results (Run ...) to the database (possibly duplicate or error, please check logs).
+                            is_final_error = True # Mark as error state
+                    except Exception as db_err: # Catch other exceptions during saving
+                        error_msg = f"Error: Failed to save results (Run {final_run_idx}) to the database: {db_err}" # Output: Error: Failed to save results (Run ...) to the database: ...
                         log_message(error_msg, is_error=True)
                         is_final_error = True
-                        print(error_msg) # 打印到控制台
-                        import traceback; traceback.print_exc() # 打印堆栈
+                        print(error_msg) # Print to console
+                        import traceback; traceback.print_exc() # Print stack trace
                 else:
-                    log_message(f"K={sample_instance.k} != 6，结果 (Run {final_run_idx}) 未保存到数据库。")
-            else: # 如果 sample_instance.result 无效或缺少 'alg' 键
-                 error_msg = f"计算执行完毕 (Run {run_idx_local})，但无法获取有效的算法结果详情。"
+                    log_message(f"K={sample_instance.k} != 6, results (Run {final_run_idx}) were not saved to the database.") # Output: K=... != 6, results (Run ...) were not saved to the database.
+            else: # If sample_instance.result is invalid or missing 'alg' key
+                 error_msg = f"Calculation finished (Run {run_idx_local}), but could not retrieve valid algorithm result details." # Output: Calculation finished (Run ...), but could not retrieve valid algorithm result details.
                  log_message(error_msg, is_error=True)
                  result_text = error_msg
                  is_final_error = True
 
-        except Exception as compute_err: # 捕捉 run_computation 过程中的顶层错误
-            error_msg = f"计算执行或结果处理过程中发生错误 (Run {run_idx_local}): {compute_err}"
+        except Exception as compute_err: # Catch top-level errors during run_computation
+            error_msg = f"Error during calculation execution or result processing (Run {run_idx_local}): {compute_err}" # Output: Error during calculation execution or result processing (Run ...): ...
             log_message(error_msg, is_error=True)
-            result_text = f"运行时错误 (Run {run_idx_local}):\n{compute_err}"
+            result_text = f"Runtime error (Run {run_idx_local}):\n{compute_err}" # Output: Runtime error (Run ...): ...
             is_final_error = True
-            print(f"--- 计算线程中的未捕获错误 (Run {run_idx_local}) ---")
-            import traceback; traceback.print_exc() # 打印堆栈到控制台
-            print(f"--- 错误结束 ---")
+            print(f"--- Uncaught error in calculation thread (Run {run_idx_local}) ---")
+            import traceback; traceback.print_exc() # Print stack trace to console
+            print(f"--- Error end ---")
 
         finally:
-            # --- 无论计算成功与否，最终都需要更新 UI 并恢复控件状态 ---
+            # --- Regardless of success or failure, finally update UI and restore control states ---
              try:
-                  # 更新主结果显示区域
+                  # Update main result display area
                   show_info_message(sample_result_info, result_text, is_error=is_final_error)
-                  # !! 关键：恢复 UI 控件的可用状态 !!
+                  # !! Crucial: Restore availability of UI controls !!
                   set_busy(False)
-                  log_message(f"计算与结果处理流程结束 (Run {run_idx_local})。UI 已恢复。")
+                  log_message(f"Calculation and result processing flow finished (Run {run_idx_local}). UI restored.") # Output: Calculation and result processing flow finished (Run ...). UI restored.
              except Exception as ui_update_err:
-                  # 捕捉更新 UI 时可能发生的错误 (虽然 Flet 应该能处理好线程安全问题)
-                  print(f"严重错误：从计算线程更新 UI 时出错: {ui_update_err}")
-                  # 尝试记录到日志
-                  try: log_message(f"!!! UI 更新错误: {ui_update_err}", is_error=True)
+                  # Catch potential errors during UI update (though Flet should handle thread safety well)
+                  print(f"Critical Error: Error updating UI from calculation thread: {ui_update_err}") # Output: Critical Error: Error updating UI from calculation thread: ...
+                  # Try logging the error
+                  try: log_message(f"!!! UI Update Error: {ui_update_err}", is_error=True) # Output: !!! UI Update Error: ...
                   except: pass
-                  # 尝试再次恢复按钮状态，以防万一
+                  # Try restoring button states again, just in case
                   try: set_busy(False)
-                  except: print("!!! 紧急：无法恢复 UI 控件状态！应用程序可能无响应。")
+                  except: print("!!! Emergency: Failed to restore UI control state! Application might be unresponsive.") # Output: !!! Emergency: Failed to restore UI control state! Application might be unresponsive.
              finally:
-                    page.update() # 确保页面得到最终更新
+                    page.update() # Ensure the page gets a final update
 
-    # --- 将 on_submit 函数绑定到提交按钮的点击事件 ---
+    # --- Bind the on_submit function to the submit button's click event ---
     submit_button.on_click = on_submit
 
     # --- ============ ---
-    # --- 页面最终布局 ---
+    # --- Final Page Layout ---
     # --- ============ ---
     # /// MODIFIED: Add print_preview_view to the layout
     page.add(
-        ft.Container( # 使用一个顶层容器包裹所有内容
+        ft.Container( # Use a top-level container to wrap all content
             content=ft.Column(
                 [
-                    main_computation_view, # 主计算视图 (初始可见)
-                    db_management_view,    # 数据库管理视图 (初始隐藏)
-                    print_preview_view     # /// NEW: 打印预览视图 (初始隐藏)
+                    main_computation_view, # Main calculation view (initially visible)
+                    db_management_view,    # Database management view (initially hidden)
+                    print_preview_view     # /// NEW: Print preview view (initially hidden)
                 ],
-                expand=True # 让内部的 Column 能够扩展
+                expand=True # Allow the inner Column to expand
             ),
-            expand=True, # 让顶层容器填充整个页面空间
-            padding = 10 # 给整体内容添加边距
+            expand=True, # Allow the top-level container to fill the entire page space
+            padding = 10 # Add padding to the overall content
         )
     )
-    # 允许整个页面在内容过多时滚动
+    # Allow the entire page to scroll if content overflows
     page.scroll = ft.ScrollMode.ADAPTIVE
 
     # --- ============ ---
-    # --- 应用初始化 ---
+    # --- Application Initialization ---
     # --- ============ ---
-    log_message("应用程序启动...")
-    log_message(f"数据库文件路径: {os.path.abspath(db.DB_FILE)}") # 显示数据库文件位置
-    log_message(f"Google OR-Tools 可用: {'是' if HAS_ORTOOLS else '否'}") # 显示 OR-Tools 状态
+    log_message("Application starting...") # Output: Application starting...
+    log_message(f"Database file path: {os.path.abspath(db.DB_FILE)}") # Display database file location # Output: Database file path: ...
+    log_message(f"Google OR-Tools available: {'Yes' if HAS_ORTOOLS else 'No'}") # Display OR-Tools status # Output: Google OR-Tools available: Yes/No
 
-    # 触发一次 c 相关信息的计算和显示 # MODIFIED: y -> c
+    # Trigger initial calculation and display of c-related info # MODIFIED: y -> c
     update_c_related_info() # MODIFIED: y -> c
 
-    # 尝试初始化数据库 (创建表，如果不存在)
+    # Try initializing the database (create table if it doesn't exist)
     try:
         db.setup_database()
-        log_message("数据库初始化检查完成。")
+        log_message("Database initialization check completed.") # Output: Database initialization check completed.
     except Exception as init_db_err:
-        msg = f"严重错误：初始化数据库失败: {init_db_err}"
+        msg = f"Critical Error: Database initialization failed: {init_db_err}" # Output: Critical Error: Database initialization failed: ...
         log_message(msg, is_error=True)
-        # 初始时 sample_result_info 可能还没完全加载好，打印到控制台更可靠
+        # sample_result_info might not be fully loaded initially, printing to console is more reliable
         print(msg)
         import traceback; traceback.print_exc()
-        # 可以在主界面显示错误提示
+        # Can display error hint on the main interface
         show_info_message(sample_result_info, msg, is_error=True)
 
-    # 初始化完成后，更新一次页面
+    # Update the page once after initialization
     page.update()
-    log_message("应用程序界面已加载，等待用户操作。")
+    log_message("Application interface loaded, waiting for user actions.") # Output: Application interface loaded, waiting for user actions.
 
-# --- 应用入口点 ---
+# --- Application Entry Point ---
 if __name__ == "__main__":
-     # --- 处理命令行参数以指定数据库路径 (可选) ---
-    if len(sys.argv) > 1: # 如果命令行提供了参数
-        custom_db_path = sys.argv[1] # 获取第一个参数
-        # 简单检查是否像一个路径或文件名
+     # --- Handle command-line arguments to specify database path (optional) ---
+    if len(sys.argv) > 1: # If command-line arguments are provided
+        custom_db_path = sys.argv[1] # Get the first argument
+        # Simple check if it looks like a path or filename
         if os.sep in custom_db_path or custom_db_path.endswith(".db"):
-            db_dir = os.path.dirname(os.path.abspath(custom_db_path)) # 获取目录部分
-            # 如果提供的是一个已存在的目录
+            db_dir = os.path.dirname(os.path.abspath(custom_db_path)) # Get the directory part
+            # If an existing directory is provided
             if os.path.isdir(custom_db_path):
-                 db.DB_FILE = os.path.join(custom_db_path, "k6_results.db") # 在该目录下使用默认文件名
+                 db.DB_FILE = os.path.join(custom_db_path, "k6_results.db") # Use default filename in that directory
                  db_dir = custom_db_path
-            else: # 如果提供的是文件路径
-                 db.DB_FILE = custom_db_path # 直接使用提供的路径
-                 db_dir = os.path.dirname(db.DB_FILE) # 获取其目录
+            else: # If a file path is provided
+                 db.DB_FILE = custom_db_path # Use the provided path directly
+                 db_dir = os.path.dirname(db.DB_FILE) # Get its directory
 
-            print(f"信息: 使用命令行指定的数据库路径: {os.path.abspath(db.DB_FILE)}")
-            # 尝试创建数据库所在的目录 (如果不存在)
+            print(f"Info: Using database path specified via command line: {os.path.abspath(db.DB_FILE)}") # Output: Info: Using database path specified via command line: ...
+            # Try creating the directory where the database resides (if it doesn't exist)
             if db_dir and not os.path.exists(db_dir): # Check if db_dir is not empty
                 try:
-                    os.makedirs(db_dir, exist_ok=True) # exist_ok=True 避免目录已存在时报错
-                    print(f"信息: 已创建数据库目录: {db_dir}")
+                    os.makedirs(db_dir, exist_ok=True) # exist_ok=True prevents error if directory already exists
+                    print(f"Info: Created database directory: {db_dir}") # Output: Info: Created database directory: ...
                 except OSError as e:
-                    print(f"错误: 无法创建数据库目录 '{db_dir}': {e}. 将使用默认路径 '{db.DB_FILE}'.")
-                    db.DB_FILE = "k6_results.db" # 恢复默认值
+                    print(f"Error: Could not create database directory '{db_dir}': {e}. Using default path '{db.DB_FILE}'.") # Output: Error: Could not create database directory '...': .... Using default path '...'.
+                    db.DB_FILE = "k6_results.db" # Revert to default
             elif not db_dir: # Handle case where db_dir is empty (e.g., just a filename was given)
-                print("信息: 数据库将在当前工作目录创建/使用。")
+                print("Info: Database will be created/used in the current working directory.") # Output: Info: Database will be created/used in the current working directory.
 
         else:
-             print(f"警告: 无效的数据库路径参数 '{custom_db_path}'. 将使用默认路径 '{db.DB_FILE}'.")
+             print(f"Warning: Invalid database path argument '{custom_db_path}'. Using default path '{db.DB_FILE}'.") # Output: Warning: Invalid database path argument '...'. Using default path '...'.
 
-    # 启动 Flet 应用程序
-    # view=ft.AppView.WEB_BROWSER 可以让应用在浏览器中打开
+    # Start the Flet application
+    # view=ft.AppView.WEB_BROWSER can make the app open in a browser
     ft.app(target=main)
