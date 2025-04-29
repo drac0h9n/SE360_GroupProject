@@ -7,6 +7,7 @@
 # **Added database result management features, allowing users to view, display details of, and delete records from the database.**
 # **Modification: Removed the secondary confirmation dialog for delete operations.**
 # **Modification: Added print preview functionality.**
+# **Modification: Added header text "An Optimal Samples Selection System" to the top of each view.**
 
 import flet as ft
 import random
@@ -27,10 +28,13 @@ random_seed = int(time.time())  # Use current time as the random seed
 random.seed(random_seed)
 print(f"Using random seed: {random_seed}") # Output: Using random seed: ...
 
+# --- Constants ---
+APP_TITLE = "An Optimal Samples Selection System" # Centralize the title
+
 # --- Main Application Function ---
 def main(page: ft.Page):
     """The main function to build and run the Flet application"""
-    page.title = "An Optimal Samples Selection System"  # Window title
+    page.title = APP_TITLE # Window title uses the constant
     page.theme_mode = ft.ThemeMode.LIGHT  # Theme mode
     page.vertical_alignment = ft.MainAxisAlignment.START  # Page vertical alignment
     page.window_width = 900   # Initial window width
@@ -159,6 +163,10 @@ def main(page: ft.Page):
     # --- Overall Container for Database Result Management View (Initially hidden) ---
     db_management_view = ft.Column(
         [
+            # --- ADDED HEADER ---
+            ft.Text(APP_TITLE, size=18, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
+            ft.Divider(),
+            # --- Original controls start here ---
             ft.Text("Database Results List", size=16, weight=ft.FontWeight.BOLD), # Title
             # /// MODIFIED: Add Print button to this row
             ft.Row(
@@ -203,6 +211,10 @@ def main(page: ft.Page):
 
     print_preview_view = ft.Column( # Overall container for the print preview view
         [
+            # --- ADDED HEADER ---
+            ft.Text(APP_TITLE, size=18, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
+            ft.Divider(),
+            # --- Original controls start here ---
             ft.Row(
                 [
                     ft.Text("Print Preview - Record Details", size=16, weight=ft.FontWeight.BOLD),
@@ -742,6 +754,10 @@ def main(page: ft.Page):
     # --- Main Computation View Container (Organizes the original calculation interface controls in a Column) ---
     main_computation_view = ft.Column(
         [
+            # --- ADDED HEADER ---
+            ft.Text(APP_TITLE, size=18, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
+            ft.Divider(),
+            # --- Original controls start here ---
             # Parameter input title
             ft.Text("Parameter Input", size=16, weight=ft.FontWeight.BOLD),
             # Row for M, N, K, J, S, Timeout input fields
