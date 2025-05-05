@@ -751,7 +751,7 @@ def main(page: ft.Page):
     # --- View Switching Logic ---
     # --- ================= ---
 
-    # --- Main Computation View Container (Organizes the original calculation interface controls in a Column) ---
+        # --- Main Computation View Container (Organizes the original calculation interface controls in a Column) ---
     main_computation_view = ft.Column(
         [
             # --- ADDED HEADER ---
@@ -785,7 +785,20 @@ def main(page: ft.Page):
                 [submit_button, progress_ring, clear_log_button, show_db_view_button], # Added show_db_view_button
                 alignment=ft.MainAxisAlignment.START, spacing=15, vertical_alignment=ft.CrossAxisAlignment.CENTER
             ),
-            # Log area title
+
+            # --- SWAPPED START ---
+            # Calculation results area title (NOW FIRST)
+            ft.Text("Calculation Results", size=14, weight=ft.FontWeight.BOLD),
+            # Calculation results display container (allows expansion)
+            ft.Container(
+                content=sample_result_info,
+                border=ft.border.all(1, ft.colors.BLACK26),
+                border_radius=ft.border_radius.all(5),
+                padding=10,
+                margin=ft.margin.only(top=5, bottom=10), # Adjusted margin slightly for spacing
+                expand=True # Result area can expand to fill remaining vertical space
+            ),
+            # Log area title (NOW SECOND)
             ft.Text("Run Log", size=14, weight=ft.FontWeight.BOLD),
             # Log output container (fixed height)
             ft.Container(
@@ -793,19 +806,11 @@ def main(page: ft.Page):
                 border=ft.border.all(1, ft.colors.BLACK12),
                 border_radius=ft.border_radius.all(5),
                 padding=5,
+                margin=ft.margin.only(top=5), # Added top margin for spacing
                 expand=False # Log area does not automatically expand to fill space
             ),
-             # Calculation results area title
-            ft.Text("Calculation Results", size=14, weight=ft.FontWeight.BOLD),
-             # Calculation results display container (allows expansion)
-            ft.Container(
-                content=sample_result_info,
-                border=ft.border.all(1, ft.colors.BLACK26),
-                border_radius=ft.border_radius.all(5),
-                padding=10,
-                margin=ft.margin.only(top=10),
-                expand=True # Result area can expand to fill remaining vertical space
-            )
+            # --- SWAPPED END ---
+
         ],
         visible=True, # Main computation view is visible by default
         expand=True   # Allow this view to expand vertically
